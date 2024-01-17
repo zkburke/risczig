@@ -52,6 +52,24 @@ pub fn main() !void {
         0xfff50513,
         //bne x10, x0, -2
         0xfe051fe3,
+
+        //addi a2, x0, 0b1111110100
+
+        //addi a7, x0, 2
+        0x00200893,
+        //addi a0, x0, 32
+        0x02000513,
+        //ecall
+        0x00000073,
+        0x3f400613,
+        //ebreak
+        0x00100073,
+        //addi a5, x0, 69
+        0x04500793,
+        //sw a5, 0(a6)
+        0x00f82023,
+        //lw a5, 0(a6)
+        0x00082783,
         //ebreak
         0x00100073,
         //mv a7, 1
@@ -95,6 +113,14 @@ pub fn main() !void {
                 1 => {
                     std.log.info("ecall: putchar: {c}", .{@as(u8, @intCast(vm.registers[@intFromEnum(Vm.AbiRegister.a0)]))});
                 },
+                //alloc
+                2 => {
+                    const size = vm.registers[@intFromEnum(Vm.AbiRegister.a0)];
+
+                    const address = std.c.malloc(size);
+
+                    vm.registers[@intFromEnum(Vm.AbiRegister.a6)] = @intFromPtr(address);
+                },
                 else => unreachable,
             }
 
@@ -102,7 +128,7 @@ pub fn main() !void {
         }
 
         pub fn ebreak(vm: *Vm) Vm.InterruptResult {
-            for (vm.registers[0..16], 0..) |value, register| {
+            for (vm.registers[0..20], 0..) |value, register| {
                 std.log.info("x{} = {}", .{ register, value });
             }
 

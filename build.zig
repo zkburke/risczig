@@ -37,9 +37,9 @@ pub fn build(b: *std.Build) void {
     // };
 
     const script_target = b.resolveTargetQuery(.{
-        .cpu_arch = .riscv32,
+        .cpu_arch = .riscv64,
         .abi = .musl,
-        .os_tag = .freestanding,
+        .os_tag = .linux,
         .cpu_features_sub = std.Target.riscv.featureSet(&.{
             .c,
         }),
@@ -49,8 +49,10 @@ pub fn build(b: *std.Build) void {
         .name = "riscv_script",
         .root_source_file = .{ .path = "src/example/riscv_script.zig" },
         .target = script_target,
-        .optimize = .Debug,
+        .optimize = .ReleaseSmall,
         .use_llvm = true,
+        .link_libc = true,
+        .single_threaded = true,
     });
 
     b.installArtifact(riscv_script);
@@ -60,6 +62,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     // This declares intent for the executable to be installed into the
