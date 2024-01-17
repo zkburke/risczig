@@ -29,6 +29,32 @@ pub fn build(b: *std.Build) void {
     // running `zig build`).
     b.installArtifact(lib);
 
+    // const script_target: std.Target = .{
+    // .os = .{
+    // .tag = .freestanding,
+    // .version_range = .{ .none = {} },
+    // },
+    // };
+
+    const script_target = b.resolveTargetQuery(.{
+        .cpu_arch = .riscv32,
+        .abi = .musl,
+        .os_tag = .freestanding,
+        .cpu_features_sub = std.Target.riscv.featureSet(&.{
+            .c,
+        }),
+    });
+
+    const riscv_script = b.addExecutable(.{
+        .name = "riscv_script",
+        .root_source_file = .{ .path = "src/example/riscv_script.zig" },
+        .target = script_target,
+        .optimize = .Debug,
+        .use_llvm = true,
+    });
+
+    b.installArtifact(riscv_script);
+
     const exe = b.addExecutable(.{
         .name = "riscz",
         .root_source_file = .{ .path = "src/main.zig" },
