@@ -26,41 +26,24 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
     const data_segment = program_headers[3];
     const text_segment = program_headers[2];
 
-    const instruction_bytes = elf_data[text_segment.p_offset .. text_segment.p_offset + text_segment.p_filesz];
-    const data_bytes = elf_data[data_segment.p_offset .. data_segment.p_offset + data_segment.p_filesz];
+    const instruction_bytes = elf_data[text_segment.offset .. text_segment.offset + text_segment.filesz];
+    const data_bytes = elf_data[data_segment.offset .. data_segment.offset + data_segment.filesz];
 
     std.log.info("instruction count approx = {}", .{instruction_bytes.len / 4});
 
     std.log.info("first instruction: 0x{x}", .{@as(*const u32, @alignCast(@ptrCast(instruction_bytes.ptr))).*});
 
-    std.log.info("data: filesz = {}, memsz = {}", .{ data_bytes.len, data_segment.p_memsz });
+    std.log.info("data: filesz = {}, memsz = {}", .{ data_bytes.len, data_segment.memsz });
     std.log.info("data: {s}", .{data_bytes});
-
-    const sorted_program_headers = try allocator.dupe(ProgramHeader, program_headers);
-    defer allocator.free(sorted_program_headers);
-
-    const S = struct {
-        pub fn lessThan(_: void, lhs: ProgramHeader, rhs: ProgramHeader) bool {
-            if (lhs.p_vaddr < rhs.p_vaddr) {
-                return true;
-            }
-
-            return false;
-        }
-    };
-    _ = S; // autofix
-
-    //sort the segments based on virtual addresses
-    // std.sort.insertion(ProgramHeader, sorted_program_headers, {}, S.lessThan);
 
     //size of the image mapped in memory
     var image_size: usize = 0;
 
-    for (sorted_program_headers) |program_header| {
-        switch (program_header.p_type) {
+    for (program_headers) |program_header| {
+        switch (program_header.type) {
             1, 6, 2, 0x70000000, PT_GNU_RELRO => {
-                image_size = @max(image_size, program_header.p_vaddr);
-                image_size += program_header.p_memsz;
+                image_size = @max(image_size, program_header.vaddr);
+                image_size += program_header.memsz;
             },
             else => {},
         }
@@ -73,28 +56,26 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
     var stack_alignment: usize = 0;
     var stack_size: usize = 0;
 
-    for (sorted_program_headers) |program_header| {
-        switch (program_header.p_type) {
+    for (program_headers) |program_header| {
+        switch (program_header.type) {
             1, 6, 2, 0x70000000, PT_GNU_RELRO => {
-                const program_header_data = elf_data[program_header.p_offset .. program_header.p_offset + program_header.p_filesz];
+                const program_header_data = elf_data[program_header.offset .. program_header.offset + program_header.filesz];
 
-                @memcpy(image[program_header.p_vaddr .. program_header.p_vaddr + program_header_data.len], program_header_data);
+                @memcpy(image[program_header.vaddr .. program_header.vaddr + program_header_data.len], program_header_data);
 
-                const rest_size = program_header.p_memsz - program_header.p_filesz;
+                const rest_size = program_header.memsz - program_header.filesz;
 
-                @memset(image[program_header.p_vaddr + program_header_data.len .. program_header.p_vaddr + program_header_data.len + rest_size], 0);
+                @memset(image[program_header.vaddr + program_header_data.len .. program_header.vaddr + program_header_data.len + rest_size], 0);
             },
             PT_GNU_STACK => {
-                stack_alignment = program_header.p_align;
-                stack_size = program_header.p_memsz;
+                stack_alignment = program_header.@"align";
+                stack_size = program_header.memsz;
             },
             else => {},
         }
     }
 
     std.log.info("(size = {}) image = {s}", .{ image_size, image[0..image_size] });
-
-    if (false) std.os.exit(0);
 
     const stack = allocator.rawAlloc(stack_size, @intCast(stack_alignment), @returnAddress()).?;
 
@@ -173,31 +154,14 @@ const PT_GNU_STACK = 0x6474e551;
 const PT_GNU_RELRO = 0x6474e552;
 
 const ProgramHeader = extern struct {
-    /// type of segment
-    /// 1 for loadable
-    p_type: u32 align(1),
-
-    /// segment dependent
-    /// NO PROTECTION
-    p_flags: u32 align(1),
-
-    /// offset of the segment in the file image
-    p_offset: u64 align(1),
-
-    /// virtual addr of segment in memory. start of this segment
-    p_vaddr: u64 align(1),
-
-    /// same as vaddr except on physical systems
-    p_paddr: u64 align(1),
-
-    p_filesz: u64 align(1),
-
-    p_memsz: u64 align(1),
-
-    /// 0 and 1 specify no alignment.
-    /// Otherwise should be a positive, integral power of 2,
-    /// with p_vaddr equating p_offset modulus p_align.
-    p_align: u64 align(1),
+    type: u32 align(1),
+    flags: u32 align(1),
+    offset: u64 align(1),
+    vaddr: u64 align(1),
+    paddr: u64 align(1),
+    filesz: u64 align(1),
+    memsz: u64 align(1),
+    @"align": u64 align(1),
 };
 
 const SectionHeader = extern struct {

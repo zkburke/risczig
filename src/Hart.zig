@@ -95,7 +95,7 @@ pub fn execute(
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        const result = a + b;
+                        const result = a +% b;
 
                         self.setRegister(r_instruction.rd, @bitCast(result));
                     },
@@ -103,7 +103,7 @@ pub fn execute(
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        const result = a - b;
+                        const result = a -% b;
 
                         self.setRegister(r_instruction.rd, @bitCast(result));
                     },
@@ -207,7 +207,7 @@ pub fn execute(
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        const result: i32 = @truncate(a + b);
+                        const result: i32 = @truncate(a +% b);
 
                         const sign_extended: i64 = @intCast(result);
 
@@ -217,7 +217,7 @@ pub fn execute(
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        const result: i32 = @truncate(a - b);
+                        const result: i32 = @truncate(a -% b);
 
                         const sign_extended: i64 = @intCast(result);
 
@@ -250,7 +250,7 @@ pub fn execute(
                         //effectively sign extends the immedidate by casting to i12 then to i64 (full width)
                         const immediate: i64 = @intCast(@as(i12, @bitCast(i_instruction.imm)));
 
-                        const result = @as(i64, @bitCast(self.registers[i_instruction.rs1])) + immediate;
+                        const result = @as(i64, @bitCast(self.registers[i_instruction.rs1])) +% immediate;
 
                         self.setRegister(i_instruction.rd, @bitCast(result));
                     },
@@ -335,7 +335,7 @@ pub fn execute(
 
                         const rs1: i32 = @bitCast(@as(u32, @truncate(self.registers[i_instruction.rs1])));
 
-                        const result = rs1 + immediate;
+                        const result = rs1 +% immediate;
 
                         self.setRegister(i_instruction.rd, @as(u32, @bitCast(result)));
                     },
@@ -354,37 +354,37 @@ pub fn execute(
 
                 switch (masked_instruction) {
                     .lb => {
-                        const pointer: *i8 align(1) = @ptrFromInt(actual);
+                        const pointer: *align(1) const i8 = @ptrFromInt(actual);
 
                         self.registers[i_instruction.rd] = @bitCast(@as(i64, @intCast(pointer.*)));
                     },
                     .lh => {
-                        const pointer: *i16 align(1) = @ptrFromInt(actual);
+                        const pointer: *align(1) const i16 = @ptrFromInt(actual);
 
                         self.registers[i_instruction.rd] = @bitCast(@as(i64, @intCast(pointer.*)));
                     },
                     .lw => {
-                        const pointer: *i32 align(1) = @ptrFromInt(actual);
+                        const pointer: *align(1) const i32 = @ptrFromInt(actual);
 
                         self.registers[i_instruction.rd] = @bitCast(@as(i64, @intCast(pointer.*)));
                     },
                     .lbu => {
-                        const pointer: *align(1) u8 = @ptrFromInt(actual);
+                        const pointer: *align(1) const u8 = @ptrFromInt(actual);
 
                         self.registers[i_instruction.rd] = pointer.*;
                     },
                     .lhu => {
-                        const pointer: *align(1) u16 = @ptrFromInt(actual);
+                        const pointer: *align(1) const u16 = @ptrFromInt(actual);
 
                         self.registers[i_instruction.rd] = pointer.*;
                     },
                     .lwu => {
-                        const pointer: *align(1) u32 = @ptrFromInt(actual);
+                        const pointer: *align(1) const u32 = @ptrFromInt(actual);
 
                         self.registers[i_instruction.rd] = pointer.*;
                     },
                     .ld => {
-                        const pointer: *align(1) u64 = @ptrFromInt(actual);
+                        const pointer: *align(1) const u64 = @ptrFromInt(actual);
 
                         self.registers[i_instruction.rd] = pointer.*;
                     },

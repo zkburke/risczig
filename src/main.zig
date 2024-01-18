@@ -1,5 +1,5 @@
 const std = @import("std");
-const Vm = @import("Vm.zig");
+const Hart = @import("Hart.zig");
 const ElfLoader = @import("ElfLoader.zig");
 
 pub fn main() !void {
@@ -89,7 +89,7 @@ pub fn main() !void {
     _ = assembled_code; // autofix
 
     const Handlers = struct {
-        pub fn ebreak(vm: *Vm) Vm.InterruptResult {
+        pub fn ebreak(vm: *Hart) Hart.InterruptResult {
             for (vm.registers[0..20], 0..) |value, register| {
                 std.log.info("x{} = {}", .{ register, value });
             }
@@ -108,10 +108,10 @@ pub fn main() !void {
     defer allocator.free(loaded_module.image);
     defer allocator.free(loaded_module.stack);
 
-    var vm = Vm.init();
+    var vm = Hart.init();
     defer vm.deinit();
 
-    vm.setRegister(@intFromEnum(Vm.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
 
     try vm.execute(
         .{

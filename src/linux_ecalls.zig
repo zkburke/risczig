@@ -2,8 +2,8 @@
 
 var err_buff: [128]u8 = [_]u8{0} ** 128;
 
-pub fn ecall(vm: *Vm) Vm.InterruptResult {
-    const code_register = Vm.AbiRegister.a7;
+pub fn ecall(vm: *Hart) Hart.InterruptResult {
+    const code_register = Hart.AbiRegister.a7;
 
     const ecall_code: ECallCode = @enumFromInt(vm.registers[@intFromEnum(code_register)]);
 
@@ -11,9 +11,9 @@ pub fn ecall(vm: *Vm) Vm.InterruptResult {
 
     switch (ecall_code) {
         .write => {
-            const pointer = vm.registers[@intFromEnum(Vm.AbiRegister.a6)];
-            const file_descriptor = vm.registers[@intFromEnum(Vm.AbiRegister.a0)];
-            const len = vm.registers[@intFromEnum(Vm.AbiRegister.a2)];
+            const pointer = vm.registers[@intFromEnum(Hart.AbiRegister.a6)];
+            const file_descriptor = vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
+            const len = vm.registers[@intFromEnum(Hart.AbiRegister.a2)];
 
             // const string_begin: [*]u8 = @ptrFromInt(pointer + 12832);
             const string_begin: [*]u8 = @ptrFromInt(pointer + 0);
@@ -26,25 +26,25 @@ pub fn ecall(vm: *Vm) Vm.InterruptResult {
                 string_begin[0..len],
             });
 
-            vm.setRegister(@intFromEnum(Vm.AbiRegister.a3), @intFromPtr(&err_buff));
+            vm.setRegister(@intFromEnum(Hart.AbiRegister.a3), @intFromPtr(&err_buff));
 
             //set error code
-            vm.setRegister(@intFromEnum(Vm.AbiRegister.a5), 0);
+            vm.setRegister(@intFromEnum(Hart.AbiRegister.a5), 0);
         },
         .exit => {
-            const error_code = vm.registers[@intFromEnum(Vm.AbiRegister.a0)];
+            const error_code = vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
 
             std.log.info("riscv script exited with code 0x{x}", .{error_code});
 
             return .halt;
         },
         .print_int => {
-            const int = vm.registers[@intFromEnum(Vm.AbiRegister.a0)];
+            const int = vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
 
             std.log.info("print_int: {}", .{int});
         },
         .gimme_a_number => {
-            vm.registers[@intFromEnum(Vm.AbiRegister.a0)] = 40;
+            vm.registers[@intFromEnum(Hart.AbiRegister.a0)] = 40;
         },
         _ => {
             std.log.info("script tried to execute unknown/unimplemented syscall {}", .{ecall_code});
@@ -71,4 +71,4 @@ pub const ECallCode = enum(u16) {
 };
 
 const std = @import("std");
-const Vm = @import("Vm.zig");
+const Hart = @import("Hart.zig");
