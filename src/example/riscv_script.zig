@@ -11,9 +11,9 @@ pub export fn _start() noreturn {
 
     // const res = fib_iter(10);
 
-    const res = fib(1);
+    const res = fib(gimmeANumber());
 
-    printInt(res);
+    for (0..10) |_| printInt(res);
 
     std.os.exit(0);
 }

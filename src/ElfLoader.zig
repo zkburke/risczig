@@ -3,10 +3,11 @@
 pub const Loaded = struct {
     image: []u8,
     entry_point: usize,
-    ///just some 'fake' stack to make things work
     stack: []u8,
 };
 
+///TODO: implement loader using mmap as a specialisation for loading files.
+///Both loading from a file and from memory should work
 pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
     const header: *const ElfHeader = @ptrCast(elf_data.ptr);
 

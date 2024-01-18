@@ -16,14 +16,14 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
             const len = vm.registers[@intFromEnum(Hart.AbiRegister.a2)];
 
             // const string_begin: [*]u8 = @ptrFromInt(pointer + 12832);
-            const string_begin: [*]u8 = @ptrFromInt(pointer + 0);
+            // const string_begin: [*]u8 = @ptrFromInt(pointer);
 
-            std.log.info("write_output (fd = {}): ptr = 0x{x}, len = {} not_sure = {s}, (num={any})", .{
+            std.log.info("write_output (fd = {}): ptr = 0x{x}, len = {} not_sure = , (num=)", .{
                 file_descriptor,
                 pointer,
                 len,
-                string_begin[0..len],
-                string_begin[0..len],
+                // string_begin[0..len],
+                // string_begin[0..len],
             });
 
             vm.setRegister(@intFromEnum(Hart.AbiRegister.a3), @intFromPtr(&err_buff));
