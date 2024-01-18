@@ -1,20 +1,12 @@
 const std = @import("std");
 const Vm = @import("Vm.zig");
+const ElfLoader = @import("ElfLoader.zig");
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit() != .leak);
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try bw.flush(); // don't forget to flush!
+    const allocator = gpa.allocator();
 
     const code = [_]u32{
         0x00112623,
@@ -83,6 +75,7 @@ pub fn main() !void {
         //ecall
         0x00000073,
     };
+    _ = loop_code; // autofix
 
     const assembled_code = [_]u32{
         //mv      a1,s0,
@@ -96,37 +89,6 @@ pub fn main() !void {
     _ = assembled_code; // autofix
 
     const Handlers = struct {
-        pub fn ecall(vm: *Vm) Vm.InterruptResult {
-            const syscall_register = Vm.AbiRegister.a7;
-
-            const ecall_code = vm.registers[@intFromEnum(syscall_register)];
-
-            std.log.info("ecall", .{});
-
-            switch (ecall_code) {
-                //example exit
-                0 => {
-                    std.log.info("ecall: exit", .{});
-                    return .halt;
-                },
-                //putchar example
-                1 => {
-                    std.log.info("ecall: putchar: {c}", .{@as(u8, @intCast(vm.registers[@intFromEnum(Vm.AbiRegister.a0)]))});
-                },
-                //alloc
-                2 => {
-                    const size = vm.registers[@intFromEnum(Vm.AbiRegister.a0)];
-
-                    const address = std.c.malloc(size);
-
-                    vm.registers[@intFromEnum(Vm.AbiRegister.a6)] = @intFromPtr(address);
-                },
-                else => unreachable,
-            }
-
-            return .pass;
-        }
-
         pub fn ebreak(vm: *Vm) Vm.InterruptResult {
             for (vm.registers[0..20], 0..) |value, register| {
                 std.log.info("x{} = {}", .{ register, value });
@@ -136,21 +98,28 @@ pub fn main() !void {
         }
     };
 
+    const riscv_script_file = try std.fs.cwd().openFile("zig-out/bin/riscv_script", .{});
+
+    const elf_data = try riscv_script_file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(elf_data);
+    riscv_script_file.close();
+
+    const loaded_module = try ElfLoader.load(allocator, elf_data);
+    defer allocator.free(loaded_module.image);
+    defer allocator.free(loaded_module.stack);
+
     var vm = Vm.init();
     defer vm.deinit();
 
-    vm.execute(
+    vm.setRegister(@intFromEnum(Vm.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+
+    try vm.execute(
         .{
-            .ecall_handler = Handlers.ecall,
+            .ecall_handler = linux_ecalls.ecall,
             .ebreak_handler = Handlers.ebreak,
         },
-        &loop_code,
+        @alignCast(@ptrCast(&loaded_module.image[loaded_module.entry_point])),
     );
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+const linux_ecalls = @import("linux_ecalls.zig");

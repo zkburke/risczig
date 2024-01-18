@@ -51,9 +51,14 @@ pub fn build(b: *std.Build) void {
         .target = script_target,
         .optimize = .ReleaseSmall,
         .use_llvm = true,
-        .link_libc = true,
+        .link_libc = false,
         .single_threaded = true,
+        .pic = true,
+        .strip = true,
+        .linkage = .static,
     });
+
+    riscv_script.pie = true;
 
     b.installArtifact(riscv_script);
 
