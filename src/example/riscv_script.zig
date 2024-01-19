@@ -1,27 +1,25 @@
 const global = "hello, world!!!!!!";
 
-extern fn riszTestExtern() callconv(.C) void;
+extern fn lol() callconv(.C) u32;
 
 pub export fn _start() noreturn {
-    _ = std.os.write(std.os.STDOUT_FILENO, global) catch unreachable;
+    std.log.err("{s}", .{global});
 
     const fib_res: i32 = @intCast(fib(10));
 
-    var fmt_buf: [32]u8 = undefined;
-
-    {
-        const printed_word = std.fmt.bufPrint(&fmt_buf, "lol: fib_res = {}", .{fib_res}) catch unreachable;
-
-        _ = std.os.write(std.os.STDOUT_FILENO, printed_word) catch unreachable;
-    }
+    std.log.err("lol: fib_res = {}", .{fib_res});
 
     const res = factorial(@intCast(gimmeANumber()));
 
-    {
-        const printed_word = std.fmt.bufPrint(&fmt_buf, "double lol: fact_res = {}", .{res}) catch unreachable;
+    std.log.err("double lol: fact_res = {}", .{res});
 
-        _ = std.os.write(std.os.STDOUT_FILENO, printed_word) catch unreachable;
-    }
+    @breakpoint();
+
+    std.log.err("@returnAddress() = {}", .{@returnAddress()});
+
+    const c_return_val = lol();
+
+    std.log.err("c_return_val = {}", .{c_return_val});
 
     printInt(res + fib_res);
 
@@ -32,6 +30,10 @@ pub export fn _start() noreturn {
     std.os.exit(0);
 }
 
+export fn zprint(str: [*:0]const u8) void {
+    std.log.err("c string: {s}", .{std.mem.span(str)});
+}
+
 fn zero(x: i32) i32 {
     if (x < 2302930293029) {
         return 0;
@@ -40,7 +42,7 @@ fn zero(x: i32) i32 {
 }
 
 fn fib(x: u32) u32 {
-    //using plus cuz mul isn't implemented
+    // std.log.err("@returnAddress() = {x}", .{@returnAddress()});
 
     if (x == 1) return 1;
     if (x == 0) return 0;
@@ -55,11 +57,7 @@ fn factorial(x: i32) i32 {
 }
 
 pub fn printInt(x: i32) void {
-    var fmt_buf: [1024]u8 = undefined;
-
-    const printed_word = std.fmt.bufPrint(&fmt_buf, "printInt = {}", .{x}) catch unreachable;
-
-    _ = std.os.write(std.os.STDERR_FILENO, printed_word) catch unreachable;
+    std.log.err("printInt = {}", .{x});
 }
 
 pub fn gimmeANumber() u32 {
@@ -82,15 +80,26 @@ pub const std_options = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
-        _ = message_level; // autofix
         _ = scope; // autofix
-        _ = format; // autofix
-        _ = args; // autofix
+
+        var fmt_buf: [1024]u8 = undefined;
+
+        _ = std.os.write(std.os.STDERR_FILENO, @tagName(message_level) ++ ": ") catch unreachable;
+
+        const printed_word = std.fmt.bufPrint(&fmt_buf, format, args) catch unreachable;
+
+        _ = std.os.write(std.os.STDERR_FILENO, printed_word) catch unreachable;
+        _ = std.os.write(std.os.STDERR_FILENO, "\n") catch unreachable;
     }
 };
 
-pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
-    _ = std.os.write(std.os.STDOUT_FILENO, msg) catch unreachable;
+pub fn panic(msg: []const u8, stacktrace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+    _ = ret_addr; // autofix
+    std.log.info("panic: {s}", .{msg});
+
+    if (stacktrace != null) {
+        std.debug.dumpStackTrace(stacktrace.?.*);
+    }
 
     std.os.exit(1);
 }

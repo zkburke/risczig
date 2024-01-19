@@ -90,8 +90,10 @@ pub fn main() !void {
 
     const Handlers = struct {
         pub fn ebreak(vm: *Hart) Hart.InterruptResult {
-            for (vm.registers[0..20], 0..) |value, register| {
-                std.log.info("x{} = {}", .{ register, value });
+            std.log.info("riscv script triggered breakpoint: pc = 0x{x}", .{@intFromPtr(vm.program_counter)});
+
+            for (vm.registers, 0..) |value, register| {
+                std.log.info("x{} = 0x{x}", .{ register, value });
             }
 
             return .pass;
@@ -111,7 +113,7 @@ pub fn main() !void {
     var vm = Hart.init();
     defer vm.deinit();
 
-    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len / 2));
 
     try vm.execute(
         .{

@@ -31,7 +31,7 @@ pub const ExecuteError = error{
 };
 
 ///Execute a stream of RISC-V instructions located in memory
-///The executing program will view this as identical to a JAL/JALR to this address
+///The executing program will view this as identical to a jal/jalr to this address
 pub fn execute(
     self: *Hart,
     comptime config: ExecuteConfig,
@@ -190,6 +190,14 @@ pub fn execute(
 
                         self.setRegister(r_instruction.rd, result);
                     },
+                    .remu => {
+                        const a: u64 = self.registers[r_instruction.rs1];
+                        const b: u64 = self.registers[r_instruction.rs2];
+
+                        const result = @rem(a, b);
+
+                        self.setRegister(r_instruction.rd, result);
+                    },
                     .addw => unreachable,
                     .subw => unreachable,
                     .sllw => unreachable,
@@ -204,6 +212,21 @@ pub fn execute(
                     .amoswap_w_aq,
                     .amoswap_w_rl,
                     => unreachable,
+                    .mulh => unreachable,
+                    .mulhsu => unreachable,
+                    .div => unreachable,
+                    .divu => {
+                        const a: u64 = self.registers[r_instruction.rs1];
+                        const b: u64 = self.registers[r_instruction.rs2];
+
+                        const result = a / b;
+
+                        self.setRegister(r_instruction.rd, result);
+                    },
+                    .rem => unreachable,
+                    .divuw => unreachable,
+                    .remw => unreachable,
+                    .remuw => unreachable,
                     else => unreachable,
                 }
 
@@ -277,6 +300,14 @@ pub fn execute(
                         const sign_extended: i64 = @intCast(result);
 
                         self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                    },
+                    .divuw => {
+                        const a: u64 = self.registers[r_instruction.rs1];
+                        const b: u64 = self.registers[r_instruction.rs2];
+
+                        const result: u32 = @truncate(a / b);
+
+                        self.setRegister(r_instruction.rd, result);
                     },
                     else => unreachable,
                 }
@@ -451,17 +482,17 @@ pub fn execute(
                     .lb => {
                         const pointer: *align(1) const i8 = @ptrFromInt(actual);
 
-                        self.registers[i_instruction.rd] = @bitCast(@as(i64, @intCast(pointer.*)));
+                        self.registers[i_instruction.rd] = @bitCast(@as(i64, pointer.*));
                     },
                     .lh => {
                         const pointer: *align(1) const i16 = @ptrFromInt(actual);
 
-                        self.registers[i_instruction.rd] = @bitCast(@as(i64, @intCast(pointer.*)));
+                        self.registers[i_instruction.rd] = @bitCast(@as(i64, pointer.*));
                     },
                     .lw => {
                         const pointer: *align(1) const i32 = @ptrFromInt(actual);
 
-                        self.registers[i_instruction.rd] = @bitCast(@as(i64, @intCast(pointer.*)));
+                        self.registers[i_instruction.rd] = @bitCast(@as(i64, pointer.*));
                     },
                     .lbu => {
                         const pointer: *align(1) const u8 = @ptrFromInt(actual);
@@ -761,6 +792,10 @@ pub fn execute(
 
                 self.program_counter += 1;
             },
+            .misc_mem => {
+                //TODO: handle fences
+                //For X86-64, a fence is a no-op*
+            },
             _ => {
                 return error.UnsupportedInstruction;
             },
@@ -772,7 +807,7 @@ pub fn execute(
 inline fn debugInstruction(self: *const Hart, instruction: u32) void {
     const instruction_generic: InstructionGeneric = @bitCast(instruction);
 
-    std.log.info("Executing instruction: encoded as: 0b{b:32}", .{instruction});
+    std.log.info("Executing instruction: encoded as: 0x{x}", .{instruction});
 
     switch (instruction_generic.opcode) {
         .lui => {
@@ -840,6 +875,9 @@ inline fn debugInstruction(self: *const Hart, instruction: u32) void {
                 .mulhu => {
                     std.log.info("mulhu x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
                 },
+                .remu => {
+                    std.log.info("remu x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
+                },
                 .addw => unreachable,
                 .subw => unreachable,
                 .sllw => unreachable,
@@ -854,6 +892,16 @@ inline fn debugInstruction(self: *const Hart, instruction: u32) void {
                 .amoswap_w_aq,
                 .amoswap_w_rl,
                 => unreachable,
+                .mulh => unreachable,
+                .mulhsu => unreachable,
+                .div => unreachable,
+                .divu => {
+                    std.log.info("divu x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
+                },
+                .rem => unreachable,
+                .divuw => unreachable,
+                .remw => unreachable,
+                .remuw => unreachable,
                 else => unreachable,
             }
         },
@@ -877,6 +925,9 @@ inline fn debugInstruction(self: *const Hart, instruction: u32) void {
                     std.log.info("mulw x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
                 },
                 .divw => unreachable,
+                .divuw => {
+                    std.log.info("divuw x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
+                },
                 else => unreachable,
             }
         },
@@ -987,25 +1038,25 @@ inline fn debugInstruction(self: *const Hart, instruction: u32) void {
 
             switch (masked_instruction) {
                 .lb => {
-                    std.log.info("lb x{}, x{} + 0x{x}", .{ i_instruction.rd, i_instruction.rs1, i_instruction.imm });
+                    std.log.info("lb x{}, x{} + {}", .{ i_instruction.rd, i_instruction.rs1, offset });
                 },
                 .lh => {
-                    std.log.info("lh x{}, x{} + 0x{x}", .{ i_instruction.rd, i_instruction.rs1, i_instruction.imm });
+                    std.log.info("lh x{}, x{} + {}", .{ i_instruction.rd, i_instruction.rs1, offset });
                 },
                 .lw => {
-                    std.log.info("lw x{}, x{} + 0x{x}", .{ i_instruction.rd, i_instruction.rs1, i_instruction.imm });
+                    std.log.info("lw x{}, x{} + {}", .{ i_instruction.rd, i_instruction.rs1, offset });
                 },
                 .lbu => {
-                    std.log.info("lbu x{}, x{} + 0x{x}", .{ i_instruction.rd, i_instruction.rs1, i_instruction.imm });
+                    std.log.info("lbu x{}, x{} + {}", .{ i_instruction.rd, i_instruction.rs1, offset });
                 },
                 .lhu => {
-                    std.log.info("lhu x{}, x{} + 0x{x} (address = 0x{x})", .{ i_instruction.rd, i_instruction.rs1, i_instruction.imm, actual });
+                    std.log.info("lhu x{}, x{} + {} (address = 0x{x})", .{ i_instruction.rd, i_instruction.rs1, offset, actual });
                 },
                 .lwu => {
-                    std.log.info("lwu x{}, x{} + 0x{x} (address = 0x{x})", .{ i_instruction.rd, i_instruction.rs1, i_instruction.imm, actual });
+                    std.log.info("lwu x{}, {}(x{})(address = 0x{x})", .{ i_instruction.rd, offset, i_instruction.rs1, actual });
                 },
                 .ld => {
-                    std.log.info("ld x{}, x{} + 0x{x} (address = 0x{x})", .{ i_instruction.rd, i_instruction.rs1, i_instruction.imm, actual });
+                    std.log.info("ld x{}, {}(x{}) (address = 0x{x})", .{ i_instruction.rd, offset, i_instruction.rs1, actual });
                 },
                 else => unreachable,
             }
@@ -1270,6 +1321,16 @@ pub const RInstructionMask = enum(u32) {
         .funct3 = 0b000,
         .funct7 = 0b0000001,
     }),
+    mulh = @bitCast(InstructionR{
+        .opcode = 0b0110011,
+        .funct3 = 0b001,
+        .funct7 = 0b0000001,
+    }),
+    mulhsu = @bitCast(InstructionR{
+        .opcode = 0b0110011,
+        .funct3 = 0b010,
+        .funct7 = 0b0000001,
+    }),
     mulhu = @bitCast(InstructionR{
         .opcode = 0b0110011,
         .funct3 = 0b011,
@@ -1280,9 +1341,44 @@ pub const RInstructionMask = enum(u32) {
         .funct3 = 0b000,
         .funct7 = 0b0000001,
     }),
+    div = @bitCast(InstructionR{
+        .opcode = 0b0110011,
+        .funct3 = 0b100,
+        .funct7 = 0b0000001,
+    }),
+    divu = @bitCast(InstructionR{
+        .opcode = 0b0110011,
+        .funct3 = 0b101,
+        .funct7 = 0b0000001,
+    }),
+    rem = @bitCast(InstructionR{
+        .opcode = 0b0110011,
+        .funct3 = 0b110,
+        .funct7 = 0b0000001,
+    }),
+    remu = @bitCast(InstructionR{
+        .opcode = 0b0110011,
+        .funct3 = 0b111,
+        .funct7 = 0b0000001,
+    }),
     divw = @bitCast(InstructionR{
         .opcode = 0b0111011,
         .funct3 = 0b100,
+        .funct7 = 0b0000001,
+    }),
+    divuw = @bitCast(InstructionR{
+        .opcode = 0b0111011,
+        .funct3 = 0b101,
+        .funct7 = 0b0000001,
+    }),
+    remw = @bitCast(InstructionR{
+        .opcode = 0b0111011,
+        .funct3 = 0b110,
+        .funct7 = 0b0000001,
+    }),
+    remuw = @bitCast(InstructionR{
+        .opcode = 0b0111011,
+        .funct3 = 0b111,
         .funct7 = 0b0000001,
     }),
     lr_w_aq = @bitCast(InstructionR{
@@ -1647,6 +1743,7 @@ pub const Opcode = enum(u7) {
     jal = 0b11_011_11,
     branch = 0b11_000_11,
     amo = 0b01_011_11,
+    misc_mem = 0b00_011_11,
     _,
 };
 

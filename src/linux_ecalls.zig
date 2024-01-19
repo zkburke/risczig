@@ -12,13 +12,21 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
             const len = vm.registers[@intFromEnum(Hart.AbiRegister.a2)];
 
             const string_begin: ?[*:0]u8 = @ptrFromInt(pointer);
+            const string = string_begin.?[0..len];
 
-            std.log.info("write_output (fd = {}): ptr = 0x{x}, len = {} not_sure = {s}", .{
-                file_descriptor,
-                pointer,
-                len,
-                string_begin.?[0..len],
-            });
+            _ = switch (file_descriptor) {
+                0 => @panic("Can't write to stdin"),
+                1 => std.os.write(std.os.STDOUT_FILENO, string),
+                2 => std.os.write(std.os.STDERR_FILENO, string),
+                else => @panic("Invalid file descriptor"),
+            } catch @panic("Write returned an error");
+
+            // std.log.info("write_output (fd = {}): ptr = 0x{x}, len = {} not_sure = {s}", .{
+            //     file_descriptor,
+            //     pointer,
+            //     len,
+            //     string_begin.?[0..len],
+            // });
 
             //set error code
             vm.setRegister(@intFromEnum(Hart.AbiRegister.a5), 0);
@@ -47,6 +55,11 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
 
             return .pass;
         },
+        .clock_gettime => {
+            const a0 = &vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
+
+            a0.* = @bitCast(std.time.milliTimestamp());
+        },
         //custom syscalls
         .gimme_a_number => {
             vm.registers[@intFromEnum(Hart.AbiRegister.a0)] = 5;
@@ -69,6 +82,7 @@ pub const ECallCode = enum(u16) {
     exit = 93,
     write = 64,
     rt_sigaction = 134,
+    clock_gettime = 403,
 
     //temporary debugging ecalls, not linux ones
     gimme_a_number = 1025,

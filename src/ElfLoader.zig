@@ -13,6 +13,13 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
 
     std.debug.assert(std.mem.eql(u8, &header.magic, "\x7fELF"));
 
+    std.debug.assert(header.version == .current);
+    std.debug.assert(header.abi == .systemv);
+    std.debug.assert(header.class == .@"64bit");
+    std.debug.assert(header.endianness == .little);
+    std.debug.assert(header.machine == .riscv);
+    std.debug.assert(header.type == .exec);
+
     std.log.info("elf_header = {}", .{header.*});
 
     const program_header_start: [*]const ProgramHeader = @ptrCast(elf_data.ptr + header.e_phoff);
@@ -26,15 +33,23 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
     //size of the image mapped in memory
     var image_size: usize = 0;
 
+    var minimum_virtual_address: usize = std.math.maxInt(usize);
+
     for (program_headers) |program_header| {
         switch (program_header.type) {
             1, 6 => {
-                image_size = @max(image_size, program_header.vaddr);
+                minimum_virtual_address = @min(minimum_virtual_address, program_header.vaddr);
+
+                image_size = @max(image_size, program_header.vaddr) - minimum_virtual_address;
                 image_size += program_header.memsz;
             },
             else => {},
         }
     }
+
+    std.debug.assert(minimum_virtual_address != std.math.maxInt(usize));
+
+    std.log.info("minimum_virtual_address = {}", .{minimum_virtual_address});
 
     const image = allocator.rawAlloc(image_size, 0, @returnAddress()).?;
 
@@ -48,11 +63,13 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
             1, 6 => {
                 const program_header_data = elf_data[program_header.offset .. program_header.offset + program_header.filesz];
 
-                @memcpy(image[program_header.vaddr .. program_header.vaddr + program_header_data.len], program_header_data);
+                const base_address = program_header.vaddr - minimum_virtual_address;
+
+                @memcpy(image[base_address .. base_address + program_header_data.len], program_header_data);
 
                 const rest_size = program_header.memsz - program_header.filesz;
 
-                @memset(image[program_header.vaddr + program_header_data.len .. program_header.vaddr + program_header_data.len + rest_size], 0);
+                @memset(image[base_address + program_header_data.len .. base_address + program_header_data.len + rest_size], 0);
             },
             PT_GNU_STACK => {
                 stack_alignment = program_header.@"align";
@@ -64,42 +81,76 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
 
     std.log.info("image base = {*}, image size = {}", .{ image, image_size });
 
+    //TODO: stack should be local/unique to each hart, not to loaded modules
     const stack = allocator.rawAlloc(stack_size, @intCast(stack_alignment), @returnAddress()).?;
 
     return Loaded{
         .image = image[0..image_size],
-        .entry_point = header.e_entry,
+        .entry_point = header.entry - minimum_virtual_address,
         .stack = stack[0..stack_size],
     };
 }
 
+const Endianess = enum(u8) {
+    little = 1,
+    big = 2,
+    _,
+};
+
+const Class = enum(u8) {
+    @"32bit" = 1,
+    @"64bit" = 2,
+    _,
+};
+
+const Machine = enum(u16) {
+    riscv = 243,
+    _,
+};
+
+const ObjectType = enum(u16) {
+    none = 0,
+    rel = 1,
+    exec = 2,
+    dyn = 3,
+    core = 4,
+    _,
+};
+
+const Version = enum(u8) {
+    current = 1,
+    _,
+};
+
+pub const OsAbi = enum(u8) {
+    systemv = 0,
+    _,
+};
+
+pub const RiscvFlags = packed struct(u32) {
+    ///Compressed instructions
+    riscv_rvc: bool,
+    pad0: u1,
+    riscv_float_abi_single: bool,
+    riscv_float_abi_double: bool,
+    pad1: u4,
+    pad2: u24,
+};
+
 const ElfHeader = extern struct {
-    /// e_ident
-    magic: [4]u8 = "\x7fELF".*,
-    /// 32 bit (1) or 64 (2)
-    class: u8 = 2,
-    /// endianness little (1) or big (2)
-    endianness: u8 = 1,
-    /// ELF version
-    version: u8 = 1,
-    /// osabi: we want systemv which is 0
-    abi: u8 = 0,
+    magic: [4]u8,
+    class: Class,
+    endianness: Endianess,
+    version: Version,
+    abi: OsAbi,
     /// abiversion: 0
-    abi_version: u8 = 0,
-    /// paddding
-    padding: [7]u8 = [_]u8{0} ** 7,
-
-    /// object type
-    e_type: u16 align(1),
-
-    /// arch
-    e_machine: u16 align(1),
-
+    abi_version: u8,
+    _padding: [7]u8,
+    type: ObjectType align(1),
+    machine: Machine align(1),
     /// version
     e_version: u32 align(1),
-
-    /// entry point
-    e_entry: u64 align(1),
+    entry: u64 align(1),
 
     /// start of program header
     /// It usually follows the file header immediately,
@@ -111,8 +162,7 @@ const ElfHeader = extern struct {
     /// start of section header table
     e_shoff: u64 align(1),
 
-    /// ???
-    e_flags: u32 align(1),
+    flags: RiscvFlags align(1),
 
     /// Contains the size of this header,
     /// normally 64 Bytes for 64-bit and 52 Bytes for 32-bit format.

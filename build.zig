@@ -22,13 +22,41 @@ pub fn build(b: *std.Build) void {
         .link_libc = false,
         .single_threaded = true,
         .pic = true,
-        .strip = true,
+        .strip = false,
         .linkage = .static,
     });
 
-    riscv_script.pie = true;
+    //link some c in as well
+    riscv_script.addCSourceFile(.{
+        .file = .{ .path = "src/example/riscv_script_c.c" },
+    });
+
+    //Question to self: is this required?
+    // riscv_script.pie = true;
 
     b.installArtifact(riscv_script);
+
+    if (false) {
+        const riscv_script_c = b.addExecutable(.{
+            .name = "riscv_script_c",
+            .root_source_file = null,
+            .target = script_target,
+            .optimize = .Debug,
+            .use_llvm = true,
+            .link_libc = true,
+            .single_threaded = true,
+            .pic = true,
+            .strip = false,
+            .linkage = .static,
+        });
+        riscv_script_c.pie = true;
+
+        riscv_script_c.addCSourceFile(.{
+            .file = .{ .path = "src/example/riscv_script_c.c" },
+        });
+
+        b.installArtifact(riscv_script_c);
+    }
 
     const exe = b.addExecutable(.{
         .name = "riscz",
