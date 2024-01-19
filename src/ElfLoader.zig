@@ -20,6 +20,9 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
     std.debug.assert(header.machine == .riscv);
     std.debug.assert(header.type == .exec);
 
+    //TODO: support compressed instructions
+    std.debug.assert(!header.flags.riscv_rvc);
+
     std.log.info("elf_header = {}", .{header.*});
 
     const program_header_start: [*]const ProgramHeader = @ptrCast(elf_data.ptr + header.e_phoff);

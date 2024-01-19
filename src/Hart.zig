@@ -1,12 +1,13 @@
 //!Virtual Machine Hart implementation for RV64I-MAFD, along with zfencei and zicsr
 //!Contains all Hart internal state
-program_counter: [*]const u32,
+///General purpose registers
 registers: [32]u64,
+program_counter: [*]const u32,
 
 pub fn init() Hart {
     return .{
-        .program_counter = undefined,
         .registers = std.mem.zeroes([32]u64),
+        .program_counter = undefined,
     };
 }
 
@@ -26,6 +27,42 @@ pub inline fn setRegister(self: *Hart, register: u5, value: u64) void {
     }
 }
 
+///The signature for a native call
+pub const NativeCall = fn (hart: *Hart) void;
+
+///Converts a function pointer to a native call function to a compatable address
+///The resulting address will cause the native call to be called when passed to the jalr instruction in rs1
+pub fn nativeCallAddress(native_call: *const NativeCall) u64 {
+    var actual_address: u64 = @intFromPtr(native_call);
+
+    actual_address <<= 16;
+
+    //set the native call flag bit at lsb
+    actual_address |= 0x00000000_00000001;
+
+    return actual_address;
+}
+
+///Converts a native call address (which can be used by jalr when passed in rs1) to a function pointer
+pub fn nativeCallPointer(address: u64) *const NativeCall {
+    const Bits = packed struct(u64) {
+        lsb: u1,
+        upper: u63,
+    };
+
+    var bits: Bits = @bitCast(address);
+
+    std.debug.assert(bits.lsb == 1);
+
+    bits.lsb = 0;
+
+    var actual_address: u64 = @bitCast(bits);
+
+    actual_address >>= 16;
+
+    return @ptrFromInt(actual_address);
+}
+
 pub const ExecuteError = error{
     UnsupportedInstruction,
 };
@@ -38,15 +75,23 @@ pub fn execute(
     ///Instruction address that will be executed
     address: [*]const u32,
 ) ExecuteError!void {
-    self.program_counter = address;
-
     const debug_instructions = false;
 
+    //Using a local program counter allows it to be put into a register
+    //As such, all instructions should read and write this program counter, NOT the program counter stored in the hart
+    //I would usually expect the compiler to be able to do this, but in this case, no.
+    var program_counter: [*]const u32 = address;
+
+    //Save the program counter into the hart state so it can be observed by host calls
+    defer self.program_counter = program_counter;
+
     while (true) {
-        const instruction = self.program_counter[0];
+        const instruction = program_counter[0];
         const instruction_generic: InstructionGeneric = @bitCast(instruction);
 
         if (debug_instructions) {
+            self.program_counter = program_counter;
+
             debugInstruction(self, instruction);
         }
 
@@ -66,7 +111,7 @@ pub fn execute(
 
                 self.setRegister(u_instruction.rd, @bitCast(sign_extended));
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .auipc => {
                 const u_instruction: InstructionU = @bitCast(instruction);
@@ -81,13 +126,13 @@ pub fn execute(
 
                 const sign_extended_offset: i64 = @as(i32, @bitCast(value));
 
-                const base: i64 = @bitCast(@intFromPtr(self.program_counter));
+                const base: i64 = @bitCast(@intFromPtr(program_counter));
 
                 const actual_address: i64 = base + sign_extended_offset;
 
                 self.setRegister(u_instruction.rd, @bitCast(actual_address));
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .op => {
                 const r_instruction: InstructionR = @bitCast(instruction);
@@ -230,7 +275,7 @@ pub fn execute(
                     else => unreachable,
                 }
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .op_32 => {
                 const r_instruction: InstructionR = @bitCast(instruction);
@@ -312,7 +357,7 @@ pub fn execute(
                     else => unreachable,
                 }
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .op_imm => {
                 const i_instruction: InstructionI = @bitCast(instruction);
@@ -403,7 +448,7 @@ pub fn execute(
                     .srliw_and_sraiw => unreachable,
                 }
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .op_imm32 => {
                 const i_instruction: InstructionI = @bitCast(instruction);
@@ -468,7 +513,7 @@ pub fn execute(
                     else => unreachable,
                 }
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .load => {
                 const i_instruction: InstructionI = @bitCast(instruction);
@@ -517,7 +562,7 @@ pub fn execute(
                     else => unreachable,
                 }
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .store => {
                 const s_instruction: InstructionS = @bitCast(instruction);
@@ -555,7 +600,7 @@ pub fn execute(
                     },
                 }
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .branch => {
                 const b_instruction: InstructionB = @bitCast(instruction);
@@ -594,20 +639,20 @@ pub fn execute(
                 switch (masked_instruction) {
                     .beq => {
                         if (self.registers[b_instruction.rs1] == self.registers[b_instruction.rs2]) {
-                            const signed_pc: i64 = @as(i64, @intCast(@intFromPtr(self.program_counter))) + @as(i64, @intCast(combined_immediate));
+                            const signed_pc: i64 = @as(i64, @intCast(@intFromPtr(program_counter))) + @as(i64, @intCast(combined_immediate));
 
-                            self.program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
+                            program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
                         } else {
-                            self.program_counter += 1;
+                            program_counter += 1;
                         }
                     },
                     .bne => {
                         if (self.registers[b_instruction.rs1] != self.registers[b_instruction.rs2]) {
-                            const signed_pc: i64 = @as(i64, @intCast(@intFromPtr(self.program_counter))) + @as(i64, @intCast(combined_immediate));
+                            const signed_pc: i64 = @as(i64, @intCast(@intFromPtr(program_counter))) + @as(i64, @intCast(combined_immediate));
 
-                            self.program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
+                            program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
                         } else {
-                            self.program_counter += 1;
+                            program_counter += 1;
                         }
                     },
                     .blt => {
@@ -615,11 +660,11 @@ pub fn execute(
                         const rs2: i64 = @bitCast(self.registers[b_instruction.rs2]);
 
                         if (rs1 < rs2) {
-                            const signed_pc: i64 = @as(i64, @intCast(@intFromPtr(self.program_counter))) + @as(i64, @intCast(combined_immediate));
+                            const signed_pc: i64 = @as(i64, @intCast(@intFromPtr(program_counter))) + @as(i64, @intCast(combined_immediate));
 
-                            self.program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
+                            program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
                         } else {
-                            self.program_counter += 1;
+                            program_counter += 1;
                         }
                     },
                     .bge => {
@@ -627,14 +672,14 @@ pub fn execute(
                         const rs2: i64 = @bitCast(self.registers[b_instruction.rs2]);
 
                         if (rs1 >= rs2) {
-                            const base = @as(i64, @bitCast(@intFromPtr(self.program_counter)));
+                            const base = @as(i64, @bitCast(@intFromPtr(program_counter)));
                             const offset = @as(i64, combined_immediate);
 
                             const signed_pc: i64 = base + offset;
 
-                            self.program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
+                            program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
                         } else {
-                            self.program_counter += 1;
+                            program_counter += 1;
                         }
                     },
                     .bltu => {
@@ -642,23 +687,23 @@ pub fn execute(
                         const rs2: u64 = self.registers[b_instruction.rs2];
 
                         if (rs1 < rs2) {
-                            const base = @as(i64, @bitCast(@intFromPtr(self.program_counter)));
+                            const base = @as(i64, @bitCast(@intFromPtr(program_counter)));
                             const offset = @as(i64, combined_immediate);
 
                             const signed_pc: i64 = base + offset;
 
-                            self.program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
+                            program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
                         } else {
-                            self.program_counter += 1;
+                            program_counter += 1;
                         }
                     },
                     .bgeu => {
                         if (self.registers[b_instruction.rs1] >= self.registers[b_instruction.rs2]) {
-                            const signed_pc: i64 = @as(i64, @intCast(@intFromPtr(self.program_counter))) + @as(i64, @intCast(combined_immediate));
+                            const signed_pc: i64 = @as(i64, @intCast(@intFromPtr(program_counter))) + @as(i64, @intCast(combined_immediate));
 
-                            self.program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
+                            program_counter = @ptrFromInt(@as(usize, @bitCast(signed_pc)));
                         } else {
-                            self.program_counter += 1;
+                            program_counter += 1;
                         }
                     },
                 }
@@ -666,7 +711,7 @@ pub fn execute(
             .jal => {
                 const j_instruction: InstructionJ = @bitCast(instruction);
 
-                const base: i64 = @bitCast(@intFromPtr(self.program_counter));
+                const base: i64 = @bitCast(@intFromPtr(program_counter));
 
                 const ImmediateAddress = packed struct(i20) {
                     imm19_12: i8,
@@ -695,14 +740,14 @@ pub fn execute(
 
                 const offset: i64 = half_offset * 2;
 
-                const return_address: u64 = @intFromPtr(self.program_counter) + 4;
+                const return_address: u64 = @intFromPtr(program_counter) + 4;
 
                 //return address
                 self.setRegister(j_instruction.rd, return_address);
 
                 const jump_address = base + offset;
 
-                self.program_counter = @ptrFromInt(@as(usize, @bitCast(jump_address)));
+                program_counter = @ptrFromInt(@as(usize, @bitCast(jump_address)));
             },
             .jalr => {
                 //TODO: implement safe, fast and transparent native call apparatus using flag bits/pointer tagging
@@ -716,7 +761,7 @@ pub fn execute(
                 const jump_address = base + offset;
 
                 //return address
-                self.setRegister(j_instruction.rd, @intFromPtr(self.program_counter) + 4);
+                self.setRegister(j_instruction.rd, @intFromPtr(program_counter) + 4);
 
                 const Result = packed struct(i64) {
                     zero: u1,
@@ -727,7 +772,21 @@ pub fn execute(
 
                 //TODO: use low bit of function pointers to indicate native calling
                 if (result.zero == 1) {
-                    @panic("Native call reached");
+                    //call native procedure
+                    std.log.info("hart: Native call reached, a0={}", .{self.registers[10]});
+
+                    //encode 48bit address space into upper 48 bits of the address, leaving the last 16 bits for 'metadata'
+
+                    const encoded_address: u64 = @bitCast(result);
+
+                    const native_procedure = nativeCallPointer(encoded_address);
+
+                    native_procedure(self);
+
+                    //jump to next instruction after jalr, emulating the effect of a ret
+                    program_counter += 1;
+
+                    continue;
                 }
 
                 result.zero = 0;
@@ -739,10 +798,13 @@ pub fn execute(
                     return;
                 }
 
-                self.program_counter = @ptrFromInt(actual_address);
+                program_counter = @ptrFromInt(actual_address);
             },
             .system => {
                 const i_instruction: InstructionI = @bitCast(instruction);
+
+                //Make hart program counter coherent so that ecalls and ebreaks can read it
+                self.program_counter = program_counter;
 
                 switch (i_instruction.imm) {
                     //ecall
@@ -770,7 +832,7 @@ pub fn execute(
                     else => {},
                 }
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .op_fp => unreachable,
             .load_fp => unreachable,
@@ -790,11 +852,13 @@ pub fn execute(
                     else => unreachable,
                 }
 
-                self.program_counter += 1;
+                program_counter += 1;
             },
             .misc_mem => {
                 //TODO: handle fences
                 //For X86-64, a fence is a no-op*
+
+                program_counter += 1;
             },
             _ => {
                 return error.UnsupportedInstruction;

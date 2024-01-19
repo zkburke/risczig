@@ -2,7 +2,9 @@ const global = "hello, world!!!!!!";
 
 extern fn lol() callconv(.C) u32;
 
-pub export fn _start() noreturn {
+const TestNativeCallFn = fn (x: u32) callconv(.C) void;
+
+pub export fn _start() void {
     std.log.err("{s}", .{global});
 
     const fib_res: i32 = @intCast(fib(10));
@@ -14,6 +16,17 @@ pub export fn _start() noreturn {
     std.log.err("double lol: fact_res = {}", .{res});
 
     @breakpoint();
+
+    // const native_call_address: usize = if (zero(res) == 0) 0x00000000_00000001 else 0;
+    const native_call_address: usize = specialCall(1026, 0);
+
+    {
+        @setRuntimeSafety(false);
+
+        const native_call_test: *const TestNativeCallFn = @ptrFromInt(native_call_address);
+
+        native_call_test(9 + 10);
+    }
 
     std.log.err("@returnAddress() = {}", .{@returnAddress()});
 

@@ -1,5 +1,11 @@
 //!Implementation for some basic linux ecalls
 
+fn testNativeCall(hart: *Hart) void {
+    _ = hart; // autofix
+
+    std.log.info("hello from testNativeCall, fn p* = {*}", .{&testNativeCall});
+}
+
 pub fn ecall(vm: *Hart) Hart.InterruptResult {
     const code_register = Hart.AbiRegister.a7;
 
@@ -64,6 +70,9 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
         .gimme_a_number => {
             vm.registers[@intFromEnum(Hart.AbiRegister.a0)] = 5;
         },
+        .get_nativecall => {
+            vm.registers[@intFromEnum(Hart.AbiRegister.a0)] = Hart.nativeCallAddress(&testNativeCall);
+        },
         _ => {
             std.log.info("script tried to execute unknown/unimplemented syscall {}", .{ecall_code});
 
@@ -86,6 +95,7 @@ pub const ECallCode = enum(u16) {
 
     //temporary debugging ecalls, not linux ones
     gimme_a_number = 1025,
+    get_nativecall = 1026,
     _,
 };
 
