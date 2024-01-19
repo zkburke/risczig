@@ -23,26 +23,12 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
         std.log.info("prog header: {}\n", .{program_header});
     }
 
-    //TODO: this is BODGED, but it's correct for now. These are our instructions
-    const data_segment = program_headers[3];
-    const text_segment = program_headers[2];
-
-    const instruction_bytes = elf_data[text_segment.offset .. text_segment.offset + text_segment.filesz];
-    const data_bytes = elf_data[data_segment.offset .. data_segment.offset + data_segment.filesz];
-
-    std.log.info("instruction count approx = {}", .{instruction_bytes.len / 4});
-
-    std.log.info("first instruction: 0x{x}", .{@as(*const u32, @alignCast(@ptrCast(instruction_bytes.ptr))).*});
-
-    std.log.info("data: filesz = {}, memsz = {}", .{ data_bytes.len, data_segment.memsz });
-    std.log.info("data: {s}", .{data_bytes});
-
     //size of the image mapped in memory
     var image_size: usize = 0;
 
     for (program_headers) |program_header| {
         switch (program_header.type) {
-            1, 6, 2, 0x70000000, PT_GNU_RELRO => {
+            1, 6 => {
                 image_size = @max(image_size, program_header.vaddr);
                 image_size += program_header.memsz;
             },
@@ -59,7 +45,7 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
 
     for (program_headers) |program_header| {
         switch (program_header.type) {
-            1, 6, 2, 0x70000000, PT_GNU_RELRO => {
+            1, 6 => {
                 const program_header_data = elf_data[program_header.offset .. program_header.offset + program_header.filesz];
 
                 @memcpy(image[program_header.vaddr .. program_header.vaddr + program_header_data.len], program_header_data);
@@ -76,7 +62,7 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
         }
     }
 
-    std.log.info("(size = {}) image = {s}", .{ image_size, image[0..image_size] });
+    std.log.info("image base = {*}, image size = {}", .{ image, image_size });
 
     const stack = allocator.rawAlloc(stack_size, @intCast(stack_alignment), @returnAddress()).?;
 

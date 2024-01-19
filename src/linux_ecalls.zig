@@ -1,32 +1,24 @@
 //!Implementation for some basic linux ecalls
 
-var err_buff: [128]u8 = [_]u8{0} ** 128;
-
 pub fn ecall(vm: *Hart) Hart.InterruptResult {
     const code_register = Hart.AbiRegister.a7;
 
     const ecall_code: ECallCode = @enumFromInt(vm.registers[@intFromEnum(code_register)]);
 
-    std.log.info("linux ecall: ", .{});
-
     switch (ecall_code) {
         .write => {
-            const pointer = vm.registers[@intFromEnum(Hart.AbiRegister.a6)];
             const file_descriptor = vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
+            const pointer = vm.registers[@intFromEnum(Hart.AbiRegister.a1)];
             const len = vm.registers[@intFromEnum(Hart.AbiRegister.a2)];
 
-            // const string_begin: [*]u8 = @ptrFromInt(pointer + 12832);
-            // const string_begin: [*]u8 = @ptrFromInt(pointer);
+            const string_begin: ?[*:0]u8 = @ptrFromInt(pointer);
 
-            std.log.info("write_output (fd = {}): ptr = 0x{x}, len = {} not_sure = , (num=)", .{
+            std.log.info("write_output (fd = {}): ptr = 0x{x}, len = {} not_sure = {s}", .{
                 file_descriptor,
                 pointer,
                 len,
-                // string_begin[0..len],
-                // string_begin[0..len],
+                string_begin.?[0..len],
             });
-
-            vm.setRegister(@intFromEnum(Hart.AbiRegister.a3), @intFromPtr(&err_buff));
 
             //set error code
             vm.setRegister(@intFromEnum(Hart.AbiRegister.a5), 0);
@@ -38,13 +30,26 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
 
             return .halt;
         },
-        .print_int => {
-            const int = vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
+        .rt_sigaction => {
+            const signum = vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
 
-            std.log.info("print_int: {}", .{int});
+            switch (signum) {
+                std.os.SIG.SEGV => {
+                    std.log.info("ecall: rt_sigaction: signum = SEGV", .{});
+                },
+                std.os.SIG.BUS => {
+                    std.log.info("ecall: rt_sigaction: signum = BUS", .{});
+                },
+                else => {
+                    std.log.info("ecall: rt_sigaction: signum = {}", .{signum});
+                },
+            }
+
+            return .pass;
         },
+        //custom syscalls
         .gimme_a_number => {
-            vm.registers[@intFromEnum(Hart.AbiRegister.a0)] = 40;
+            vm.registers[@intFromEnum(Hart.AbiRegister.a0)] = 5;
         },
         _ => {
             std.log.info("script tried to execute unknown/unimplemented syscall {}", .{ecall_code});
@@ -63,9 +68,9 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
 pub const ECallCode = enum(u16) {
     exit = 93,
     write = 64,
+    rt_sigaction = 134,
 
     //temporary debugging ecalls, not linux ones
-    print_int = 1024,
     gimme_a_number = 1025,
     _,
 };

@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) void {
         .name = "riscv_script",
         .root_source_file = .{ .path = "src/example/riscv_script.zig" },
         .target = script_target,
-        .optimize = .ReleaseSmall,
+        .optimize = .Debug,
         .use_llvm = true,
         .link_libc = false,
         .single_threaded = true,
