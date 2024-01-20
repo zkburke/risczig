@@ -5,6 +5,7 @@ extern fn lol() callconv(.C) u32;
 const TestNativeCallFn = fn (x: u32) callconv(.C) void;
 
 extern fn testNativeCall(x: u32) callconv(.C) void;
+extern fn puts(string: [*:0]const u8) callconv(.C) void;
 
 extern var funny_value: u32;
 
@@ -35,6 +36,10 @@ pub export fn _start() void {
     testNativeCall(21);
 
     const c_return_val = lol();
+
+    puts("Hello, world from zig");
+
+    if (true) unreachable;
 
     std.log.err("c_return_val = {}", .{c_return_val});
 

@@ -109,7 +109,9 @@ pub fn main() !void {
     const native_procedures = std.ComptimeStringMap(
         *const Hart.NativeCall,
         .{
-            .{ "testNativeCall", &testNativeCall },
+            .{ "testNativeCall", &native_abi.nativeCallWrapper(testNativeCall) },
+            .{ "printf", &native_abi.nativeCallWrapper(nativePrintf) },
+            .{ "puts", &native_abi.nativeCallWrapper(nativePuts) },
         },
     );
 
@@ -135,11 +137,21 @@ pub fn main() !void {
     );
 }
 
-fn testNativeCall(hart: *Hart) void {
-    std.log.info("HELLO from main.zig from testNativeCall, fn p* = {*}, a0={}", .{
-        &testNativeCall,
-        hart.registers[10],
-    });
+fn nativePuts(string: [*:0]const u8) callconv(.C) void {
+    std.log.info("{*}", .{string});
+
+    // _ = std.io.getStdErr().write(std.mem.span(string)) catch unreachable;
+    _ = std.io.getStdErr().write("\n") catch unreachable;
 }
 
+fn nativePrintf(format: [*:0]const u8) callconv(.C) void {
+    _ = std.io.getStdErr().write(std.mem.span(format)) catch unreachable;
+    _ = std.io.getStdErr().write("\n") catch unreachable;
+}
+
+fn testNativeCall(x: u32) callconv(.C) void {
+    std.log.info("testNativeCall: x = {}", .{x});
+}
+
+const native_abi = @import("native_abi.zig");
 const linux_ecalls = @import("linux_ecalls.zig");

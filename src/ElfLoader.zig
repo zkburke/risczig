@@ -60,6 +60,7 @@ pub fn load(
     std.log.info("minimum_virtual_address = {}", .{minimum_virtual_address});
 
     const image = allocator.rawAlloc(image_size, 32, @returnAddress()).?;
+    errdefer allocator.free(image[0..image_size]);
 
     @memset(image[0..image_size], undefined);
 
@@ -155,7 +156,11 @@ pub fn load(
 
                                     const string = std.mem.span(string_ptr);
 
-                                    const native_procedure = native_procedures.get(string).?;
+                                    const native_procedure = native_procedures.get(string) orelse {
+                                        std.log.info("Failed to find symbol '{s}'", .{string});
+
+                                        return error.SymbolFailure;
+                                    };
 
                                     address_ptr.* = Hart.nativeCallAddress(native_procedure);
                                 } else {
@@ -181,7 +186,8 @@ pub fn load(
     std.log.info("image base = {*}, image size = {}", .{ image, image_size });
 
     //TODO: stack should be local/unique to each hart, not to loaded modules
-    const stack = allocator.rawAlloc(stack_size, 0, @returnAddress()).?;
+    const stack = allocator.rawAlloc(stack_size, 16, @returnAddress()).?;
+    errdefer allocator.free(stack[0..stack_size]);
 
     std.log.info("stack base = {*}, stack size = {}", .{ stack, stack_size });
 

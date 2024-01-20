@@ -75,7 +75,7 @@ pub fn execute(
     ///Instruction address that will be executed
     address: [*]const u32,
 ) ExecuteError!void {
-    const debug_instructions = false;
+    const debug_instructions = true;
 
     //Using a local program counter allows it to be put into a register
     //As such, all instructions should read and write this program counter, NOT the program counter stored in the hart
