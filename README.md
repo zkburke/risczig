@@ -16,3 +16,7 @@ space. This is done in a pretty lazy and unsecure way at the moment, but any
 exploits that could arise from this are already prohibitively difficult to do as
 the loader implementation essentially has ASLR (Address Space Layout
 Randomization) in its simplest form.
+
+This project can be thought of as an exploratory leap from my other project that
+attempted to achieve this in a way that I _think_ RISC-V does better
+https://github.com/zkburke/callisto
