@@ -160,13 +160,15 @@ pub fn load(
 
                                     const string = std.mem.span(string_ptr);
 
-                                    const native_procedure = native_procedures.get(string) orelse {
-                                        std.log.info("Failed to find symbol '{s}'", .{string});
+                                    if (@TypeOf(native_procedures) != @TypeOf(null)) {
+                                        const native_procedure = native_procedures.get(string) orelse {
+                                            std.log.info("Failed to find symbol '{s}'", .{string});
 
-                                        return error.SymbolFailure;
-                                    };
+                                            return error.SymbolFailure;
+                                        };
 
-                                    address_ptr.* = Hart.nativeCallAddress(native_procedure);
+                                        address_ptr.* = Hart.nativeCallAddress(native_procedure);
+                                    }
                                 } else {
                                     //Resolve local symbols from the elf file directly
                                     //I'm not sure why the program being loaded even has plt symbols which it knows at static link time anyway

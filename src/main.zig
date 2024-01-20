@@ -141,11 +141,20 @@ pub fn main() !void {
     //The entry point specified in the elf header
     const entry_point: [*]const u32 = @alignCast(@ptrCast(&loaded_module.image[loaded_module.entry_point]));
 
-    _ = entry_point;
-
     const mod_init_address: [*]const u32 = @ptrFromInt(imported_symbol_addresses[0]);
     const mod_deinit_address: [*]const u32 = @ptrFromInt(imported_symbol_addresses[1]);
 
+    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+
+    try vm.execute(
+        .{
+            .ecall_handler = linux_ecalls.ecall,
+            .ebreak_handler = Handlers.ebreak,
+        },
+        entry_point,
+    );
+
+    vm.resetRegisters();
     vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
 
     try vm.execute(

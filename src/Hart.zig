@@ -97,7 +97,7 @@ pub fn execute(
         if (debug_instructions) {
             self.program_counter = program_counter;
 
-            debugInstruction(self, instruction);
+            hart_debug.debugInstruction(self, instruction);
         }
 
         switch (instruction_generic.opcode) {
@@ -232,14 +232,6 @@ pub fn execute(
 
                         self.setRegister(r_instruction.rd, @bitCast(result));
                     },
-                    .mulhu => {
-                        const a: u64 = self.registers[r_instruction.rs1];
-                        const b: u64 = self.registers[r_instruction.rs2];
-
-                        const result = a *% b;
-
-                        self.setRegister(r_instruction.rd, result);
-                    },
                     .remu => {
                         const a: u64 = self.registers[r_instruction.rs1];
                         const b: u64 = self.registers[r_instruction.rs2];
@@ -248,23 +240,47 @@ pub fn execute(
 
                         self.setRegister(r_instruction.rd, result);
                     },
-                    .addw => unreachable,
-                    .subw => unreachable,
-                    .sllw => unreachable,
-                    .srlw => unreachable,
-                    .sraw => unreachable,
-                    .mulw => unreachable,
-                    .divw => unreachable,
-                    .lr_w_aq,
-                    .lr_w_rl,
-                    .sc_w_aq,
-                    .sc_w_rl,
-                    .amoswap_w_aq,
-                    .amoswap_w_rl,
-                    => unreachable,
-                    .mulh => unreachable,
-                    .mulhsu => unreachable,
-                    .div => unreachable,
+                    .mulh => {
+                        const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
+                        const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
+
+                        const result: i128 = a *% b;
+
+                        const upper: i64 = @truncate(result >> @bitSizeOf(u64));
+
+                        self.setRegister(r_instruction.rd, @bitCast(upper));
+                    },
+                    .mulhu => {
+                        const a: u64 = self.registers[r_instruction.rs1];
+                        const b: u64 = self.registers[r_instruction.rs2];
+
+                        const result: u128 = a *% b;
+
+                        const upper: u64 = @truncate(result >> @bitSizeOf(u64));
+
+                        self.setRegister(r_instruction.rd, upper);
+                    },
+                    .mulhsu => {
+                        const rs1: i64 = @bitCast(self.registers[r_instruction.rs1]);
+                        const rs2: i64 = @intCast(self.registers[r_instruction.rs2]);
+
+                        const result: i128 = rs1 *% rs2;
+
+                        const upper: i64 = @truncate(result >> @bitSizeOf(u64));
+
+                        self.setRegister(r_instruction.rd, @bitCast(upper));
+                    },
+                    .div => {
+                        const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
+                        const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
+
+                        //TODO: handle division by zero
+                        @setRuntimeSafety(false);
+
+                        const result: i64 = @divTrunc(a, b);
+
+                        self.setRegister(r_instruction.rd, @bitCast(result));
+                    },
                     .divu => {
                         const a: u64 = self.registers[r_instruction.rs1];
                         const b: u64 = self.registers[r_instruction.rs2];
@@ -273,10 +289,14 @@ pub fn execute(
 
                         self.setRegister(r_instruction.rd, result);
                     },
-                    .rem => unreachable,
-                    .divuw => unreachable,
-                    .remw => unreachable,
-                    .remuw => unreachable,
+                    .rem => {
+                        const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
+                        const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
+
+                        const result: i64 = @rem(a, b);
+
+                        self.setRegister(r_instruction.rd, @bitCast(result));
+                    },
                     else => unreachable,
                 }
 
@@ -308,26 +328,31 @@ pub fn execute(
                         self.setRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .sllw => {
-                        const a: u64 = self.registers[r_instruction.rs1];
+                        const signed_rs1: i64 = @bitCast(self.registers[r_instruction.rs1]);
+                        const a: i32 = @truncate(signed_rs1);
                         const b: u5 = @truncate(self.registers[r_instruction.rs2]);
 
-                        const result: u32 = @truncate(a << b);
+                        const result: i32 = a << b;
+                        const sign_extended: i64 = result;
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .srlw => {
-                        const a: u64 = self.registers[r_instruction.rs1];
+                        const a: u32 = @truncate(self.registers[r_instruction.rs1]);
                         const b: u5 = @truncate(self.registers[r_instruction.rs2]);
 
-                        const result: u32 = @truncate(a >> b);
+                        const result: u32 = a >> b;
 
-                        self.setRegister(r_instruction.rd, result);
+                        const signed: i32 = @bitCast(result);
+                        const sign_extension: i64 = signed;
+
+                        self.setRegister(r_instruction.rd, @bitCast(sign_extension));
                     },
                     .sraw => {
-                        const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
+                        const a: i32 = @truncate(@as(i64, @bitCast(self.registers[r_instruction.rs1])));
                         const b: u5 = @truncate(self.registers[r_instruction.rs2]);
 
-                        const result: i32 = @truncate(a >> b);
+                        const result: i32 = a >> b;
 
                         const sign_extended: i64 = result;
 
@@ -387,7 +412,8 @@ pub fn execute(
                     },
                     .sltiu => {
                         const a: u64 = self.registers[i_instruction.rs1];
-                        const b: u64 = i_instruction.imm;
+                        const b_sign_extended: i64 = @as(i12, @bitCast(i_instruction.imm));
+                        const b: u64 = @bitCast(b_sign_extended);
 
                         const result: u64 = @intFromBool(a < b);
 
@@ -400,7 +426,13 @@ pub fn execute(
 
                         self.setRegister(i_instruction.rd, @bitCast(result));
                     },
-                    .ori => unreachable,
+                    .ori => {
+                        const immediate: i64 = @intCast(@as(i12, @bitCast(i_instruction.imm)));
+
+                        const result = @as(i64, @bitCast(self.registers[i_instruction.rs1])) | immediate;
+
+                        self.setRegister(i_instruction.rd, @bitCast(result));
+                    },
                     .andi => {
                         const immediate: i64 = @intCast(@as(i12, @bitCast(i_instruction.imm)));
 
@@ -441,16 +473,7 @@ pub fn execute(
                             else => unreachable,
                         }
                     },
-                    .lb => unreachable,
-                    .lh => unreachable,
-                    .lw => unreachable,
-                    .lbu => unreachable,
-                    .lhu => unreachable,
-                    .ld => unreachable,
-                    .lwu => unreachable,
-                    .addiw => unreachable,
-                    .slliw => unreachable,
-                    .srliw_and_sraiw => unreachable,
+                    else => unreachable,
                 }
 
                 program_counter += 1;
@@ -474,22 +497,26 @@ pub fn execute(
                     },
                     .slliw => {
                         const Immediate = packed struct(u12) {
-                            shamt: u6,
+                            shamt: u5,
+                            zero: u1,
                             funct6: u6,
                         };
 
                         const imm: Immediate = @bitCast(i_instruction.imm);
 
-                        const rs1 = self.registers[i_instruction.rs1];
+                        const rs1: i64 = @bitCast(self.registers[i_instruction.rs1]);
+                        const rs1_32: i32 = @truncate(rs1);
                         const shift_ammount = imm.shamt;
 
-                        const result: u32 = @truncate(rs1 << shift_ammount);
+                        const result: i32 = @truncate(rs1_32 << shift_ammount);
+                        const sign_extended: i64 = result;
 
-                        self.setRegister(i_instruction.rd, result);
+                        self.setRegister(i_instruction.rd, @bitCast(sign_extended));
                     },
                     .srliw_and_sraiw => {
                         const Immediate = packed struct(u12) {
-                            shamt: u6,
+                            shamt: u5,
+                            zero: u1,
                             funct6: u6,
                         };
 
@@ -498,15 +525,23 @@ pub fn execute(
                         const shift_ammount = imm.shamt;
 
                         switch (imm.funct6) {
+                            //Right logical
                             0b000000 => {
-                                const result: u32 = @truncate(rs1 >> shift_ammount);
+                                const rs1_u32: u32 = @truncate(rs1);
 
-                                self.setRegister(i_instruction.rd, result);
+                                const result: u32 = rs1_u32 >> shift_ammount;
+
+                                const signed: i32 = @bitCast(result);
+
+                                const sign_extended: i64 = signed;
+
+                                self.setRegister(i_instruction.rd, @bitCast(sign_extended));
                             },
+                            //Right arithmetic
                             0b010000 => {
-                                const rs1_signed: i64 = @bitCast(rs1);
+                                const rs1_signed: i32 = @truncate(@as(i64, @bitCast(rs1)));
 
-                                const result: i32 = @truncate(rs1_signed >> shift_ammount);
+                                const result: i32 = rs1_signed >> shift_ammount;
 
                                 const sign_extended: i64 = result;
 
@@ -867,426 +902,6 @@ pub fn execute(
                 return error.UnsupportedInstruction;
             },
         }
-    }
-}
-
-///Debug the execution of an instruction
-inline fn debugInstruction(self: *const Hart, instruction: u32) void {
-    const instruction_generic: InstructionGeneric = @bitCast(instruction);
-
-    std.log.info("Executing instruction: encoded as: 0x{x}", .{instruction});
-
-    switch (instruction_generic.opcode) {
-        .lui => {
-            const u_instruction: InstructionU = @bitCast(instruction);
-
-            std.log.info("lui x{}, {}", .{ u_instruction.rd, u_instruction.imm });
-        },
-        .auipc => {
-            const u_instruction: InstructionU = @bitCast(instruction);
-
-            const value: packed struct(i32) {
-                lower: u12,
-                upper: u20,
-            } = .{
-                .lower = 0,
-                .upper = u_instruction.imm,
-            };
-
-            const sign_extended_offset: i64 = @as(i32, @bitCast(value));
-
-            const base: i64 = @bitCast(@intFromPtr(self.program_counter));
-
-            const actual_address: u64 = @bitCast(base + sign_extended_offset);
-
-            std.log.info("auipc x{}, {} (address = 0x{})", .{ u_instruction.rd, sign_extended_offset, actual_address });
-        },
-        .op => {
-            const r_instruction: InstructionR = @bitCast(instruction);
-            const masked_instruction: RInstructionMask = @enumFromInt(instruction & RInstructionMask.removing_mask);
-
-            switch (masked_instruction) {
-                .add => {
-                    std.log.info("add x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .sub => {
-                    std.log.info("sub x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .@"and" => {
-                    std.log.info("and x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .@"or" => {
-                    std.log.info("or x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .xor => {
-                    std.log.info("xor x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .sll => {
-                    std.log.info("sll x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .slt => {
-                    std.log.info("sll x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .sltu => {
-                    std.log.info("sltu x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .srl => {
-                    std.log.info("srl x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .sra => {
-                    std.log.info("sra x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .mul => {
-                    std.log.info("mul x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .mulhu => {
-                    std.log.info("mulhu x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .remu => {
-                    std.log.info("remu x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .addw => unreachable,
-                .subw => unreachable,
-                .sllw => unreachable,
-                .srlw => unreachable,
-                .sraw => unreachable,
-                .mulw => unreachable,
-                .divw => unreachable,
-                .lr_w_aq,
-                .lr_w_rl,
-                .sc_w_aq,
-                .sc_w_rl,
-                .amoswap_w_aq,
-                .amoswap_w_rl,
-                => unreachable,
-                .mulh => unreachable,
-                .mulhsu => unreachable,
-                .div => unreachable,
-                .divu => {
-                    std.log.info("divu x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .rem => unreachable,
-                .divuw => unreachable,
-                .remw => unreachable,
-                .remuw => unreachable,
-                else => unreachable,
-            }
-        },
-        .op_32 => {
-            const r_instruction: InstructionR = @bitCast(instruction);
-            const masked_instruction: RInstructionMask = @enumFromInt(instruction & RInstructionMask.removing_mask);
-
-            switch (masked_instruction) {
-                .addw => {
-                    std.log.info("addw x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .subw => {
-                    std.log.info("subw x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .sllw => {
-                    std.log.info("sllw x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .srlw => unreachable,
-                .sraw => unreachable,
-                .mulw => {
-                    std.log.info("mulw x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                .divw => unreachable,
-                .divuw => {
-                    std.log.info("divuw x{}, x{}, x{}", .{ r_instruction.rd, r_instruction.rs1, r_instruction.rs2 });
-                },
-                else => unreachable,
-            }
-        },
-        .op_imm => {
-            const i_instruction: InstructionI = @bitCast(instruction);
-            const masked_instruction: IInstructionMask = @enumFromInt(instruction & IInstructionMask.removing_mask);
-
-            const immediate: i64 = @intCast(@as(i12, @bitCast(i_instruction.imm)));
-
-            switch (masked_instruction) {
-                .addi => {
-                    std.log.info("addi x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, immediate });
-                },
-                .slti => unreachable,
-                .sltiu => {
-                    std.log.info("sltiu x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, immediate });
-                },
-                .xori => {
-                    std.log.info("xori x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, immediate });
-                },
-                .ori => unreachable,
-                .andi => {
-                    std.log.info("andi x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, immediate });
-                },
-                .lb => unreachable,
-                .lh => unreachable,
-                .lw => unreachable,
-                .lbu => unreachable,
-                .lhu => unreachable,
-                .ld => unreachable,
-                .lwu => unreachable,
-                .addiw => unreachable,
-                .slliw => unreachable,
-                .srliw_and_sraiw => unreachable,
-                .slli => {
-                    const Immediate = packed struct(u12) {
-                        shamt: u6,
-                        funct6: u6,
-                    };
-
-                    const imm: Immediate = @bitCast(i_instruction.imm);
-
-                    std.log.info("slli x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, imm.shamt });
-                },
-                .srli_and_srai => {
-                    const Immediate = packed struct(u12) {
-                        shamt: u6,
-                        funct6: u6,
-                    };
-
-                    const imm: Immediate = @bitCast(i_instruction.imm);
-
-                    switch (imm.funct6) {
-                        0b000000 => {
-                            std.log.info("srli x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, imm.shamt });
-                        },
-                        0b010000 => {
-                            std.log.info("srai x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, imm.shamt });
-                        },
-                        else => unreachable,
-                    }
-                },
-            }
-        },
-        .op_imm32 => {
-            const i_instruction: InstructionI = @bitCast(instruction);
-            const masked_instruction: IInstructionMask = @enumFromInt(instruction & IInstructionMask.removing_mask);
-
-            const immediate: i32 = @intCast(@as(i12, @bitCast(i_instruction.imm)));
-
-            switch (masked_instruction) {
-                .addiw => {
-                    //effectively sign extends the immedidate by casting to i12 then to i64 (full width)
-
-                    std.log.info("addi x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, immediate });
-                },
-                .slliw => {
-                    std.log.info("slliw x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, immediate });
-                },
-                .srliw_and_sraiw => {
-                    const Immediate = packed struct(u12) {
-                        shamt: u6,
-                        funct6: u6,
-                    };
-
-                    const imm: Immediate = @bitCast(i_instruction.imm);
-
-                    switch (imm.funct6) {
-                        0b000000 => {
-                            std.log.info("srliw x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, imm.shamt });
-                        },
-                        0b010000 => {
-                            std.log.info("sraiw x{}, x{}, {}", .{ i_instruction.rd, i_instruction.rs1, imm.shamt });
-                        },
-                        else => unreachable,
-                    }
-                },
-                else => unreachable,
-            }
-        },
-        .load => {
-            const i_instruction: InstructionI = @bitCast(instruction);
-            const masked_instruction: IInstructionMask = @enumFromInt(instruction & IInstructionMask.removing_mask);
-
-            const base: i64 = @bitCast(self.registers[i_instruction.rs1]);
-            const offset: i64 = @as(i12, @bitCast(i_instruction.imm));
-            const actual: u64 = @bitCast(base + offset);
-
-            switch (masked_instruction) {
-                .lb => {
-                    std.log.info("lb x{}, x{} + {}", .{ i_instruction.rd, i_instruction.rs1, offset });
-                },
-                .lh => {
-                    std.log.info("lh x{}, x{} + {}", .{ i_instruction.rd, i_instruction.rs1, offset });
-                },
-                .lw => {
-                    std.log.info("lw x{}, x{} + {}", .{ i_instruction.rd, i_instruction.rs1, offset });
-                },
-                .lbu => {
-                    std.log.info("lbu x{}, x{} + {}", .{ i_instruction.rd, i_instruction.rs1, offset });
-                },
-                .lhu => {
-                    std.log.info("lhu x{}, x{} + {} (address = 0x{x})", .{ i_instruction.rd, i_instruction.rs1, offset, actual });
-                },
-                .lwu => {
-                    std.log.info("lwu x{}, {}(x{})(address = 0x{x})", .{ i_instruction.rd, offset, i_instruction.rs1, actual });
-                },
-                .ld => {
-                    std.log.info("ld x{}, {}(x{}) (address = 0x{x})", .{ i_instruction.rd, offset, i_instruction.rs1, actual });
-                },
-                else => unreachable,
-            }
-        },
-        .store => {
-            const s_instruction: InstructionS = @bitCast(instruction);
-            const masked_instruction: SInstructionMask = @enumFromInt(instruction & SInstructionMask.removing_mask);
-
-            const immediate: packed struct(i12) {
-                lower: u5,
-                upper: u7,
-            } = .{ .lower = s_instruction.imm, .upper = s_instruction.imm_1 };
-
-            const offset: i64 = @as(i12, @bitCast(immediate));
-            const base: i64 = @bitCast(self.registers[s_instruction.rs1]);
-            const actual: u64 = @bitCast(base + offset);
-            _ = actual; // autofix
-
-            switch (masked_instruction) {
-                .sb => {
-                    std.log.info("sb x{}, {}(x{})", .{ s_instruction.rs2, offset, s_instruction.rs1 });
-                },
-                .sh => {
-                    std.log.info("sh x{}, {}(x{})", .{ s_instruction.rs2, offset, s_instruction.rs1 });
-                },
-                .sw => {
-                    std.log.info("sw x{}, {}(x{})", .{ s_instruction.rs2, offset, s_instruction.rs1 });
-                },
-                .sd => {
-                    std.log.info("sd x{}, {}(x{})", .{ s_instruction.rs2, offset, s_instruction.rs1 });
-                },
-            }
-        },
-        .branch => {
-            const b_instruction: InstructionB = @bitCast(instruction);
-            const masked_instruction: BInstructionMask = @enumFromInt(instruction & BInstructionMask.removing_mask);
-
-            const AddressImmediateUpper = packed struct(u7) {
-                imm10_5: i6,
-                imm12: i1,
-            };
-
-            const AddressImmediateLower = packed struct(u5) {
-                imm11: i1,
-                imm4_1: i4,
-            };
-
-            const imm_lower: AddressImmediateLower = @bitCast(b_instruction.imm);
-            const imm_upper: AddressImmediateUpper = @bitCast(b_instruction.imm_1);
-
-            const ReconstitudedImmediate = packed struct(i13) {
-                imm0: i1 = 0,
-                imm4_1: i4,
-                imm10_5: i6,
-                imm11: i1,
-                imm12: i1,
-            };
-
-            const imm_reconstituted: ReconstitudedImmediate = .{
-                .imm11 = imm_lower.imm11,
-                .imm4_1 = imm_lower.imm4_1,
-                .imm10_5 = imm_upper.imm10_5,
-                .imm12 = imm_upper.imm12,
-            };
-
-            switch (masked_instruction) {
-                .beq => {
-                    const CombinedImmediate = packed struct(i13) {
-                        zero: u1 = 0,
-                        imm_0: u5,
-                        imm_1: u7,
-                    };
-
-                    const combined_immediate: i13 = @bitCast(CombinedImmediate{ .imm_0 = b_instruction.imm, .imm_1 = b_instruction.imm_1 });
-
-                    std.log.info("beq x{}, x{}, {}", .{ b_instruction.rs1, b_instruction.rs2, combined_immediate });
-                },
-                .bne => {
-                    const CombinedImmediate = packed struct(i13) {
-                        zero: u1 = 0,
-                        imm_0: u5,
-                        imm_1: u7,
-                    };
-
-                    const combined_immediate: i13 = @bitCast(CombinedImmediate{ .imm_0 = b_instruction.imm, .imm_1 = b_instruction.imm_1 });
-
-                    std.log.info("bne x{}, x{}, {}", .{ b_instruction.rs1, b_instruction.rs2, combined_immediate });
-                },
-                .blt => {
-                    const CombinedImmediate = packed struct(i13) {
-                        zero: u1 = 0,
-                        imm_0: u5,
-                        imm_1: u7,
-                    };
-
-                    const combined_immediate: i13 = @bitCast(CombinedImmediate{ .imm_0 = b_instruction.imm, .imm_1 = b_instruction.imm_1 });
-
-                    std.log.info("bne x{}, x{}, {}", .{ b_instruction.rs1, b_instruction.rs2, combined_immediate });
-                },
-                .bge => {
-                    const combined_immediate: i13 = @bitCast(imm_reconstituted);
-
-                    std.log.info("bge x{}, x{}, {}", .{ b_instruction.rs1, b_instruction.rs2, combined_immediate });
-                },
-                .bltu => {
-                    const combined_immediate: i13 = @bitCast(imm_reconstituted);
-
-                    std.log.info("bltu x{}, x{}, {}", .{ b_instruction.rs1, b_instruction.rs2, combined_immediate });
-                },
-                .bgeu => {
-                    const CombinedImmediate = packed struct(i13) {
-                        zero: u1 = 0,
-                        imm_0: u5,
-                        imm_1: u7,
-                    };
-
-                    const combined_immediate: i13 = @bitCast(CombinedImmediate{ .imm_0 = b_instruction.imm, .imm_1 = b_instruction.imm_1 });
-
-                    std.log.info("bltu x{}, x{}, {}", .{ b_instruction.rs1, b_instruction.rs2, combined_immediate });
-                },
-            }
-        },
-        .jal => {
-            const j_instruction: InstructionJ = @bitCast(instruction);
-
-            std.log.info("jal x{}, pc + 0x{x}", .{ j_instruction.rd, j_instruction.imm });
-        },
-        .jalr => {
-            const j_instruction: InstructionI = @bitCast(instruction);
-
-            std.log.info("jalr x{}, x{} + 0x{x}", .{ j_instruction.rd, j_instruction.rs1, j_instruction.imm });
-        },
-        .system => {
-            const i_instruction: InstructionI = @bitCast(instruction);
-
-            switch (i_instruction.imm) {
-                //ecall
-                0 => {
-                    std.log.info("ecall", .{});
-                },
-                //ebreak
-                1 => {
-                    std.log.info("ebreak", .{});
-                },
-                else => {},
-            }
-        },
-        .amo => {
-            const r_instruction: InstructionR = @bitCast(instruction);
-            const masked_instruction: RInstructionMask = @enumFromInt(instruction & RInstructionMask.removing_mask);
-
-            switch (masked_instruction) {
-                .lr_w_aq_rl => {
-                    std.log.info("lr.w.aq.rl x{}, x{}", .{ r_instruction.rd, r_instruction.rs1 });
-                },
-                else => {
-                    std.log.info("Unknown instruction = {b}", .{instruction_generic.opcode});
-                },
-            }
-        },
-        else => {
-            std.log.info("Unknown instruction = {b}", .{instruction_generic.opcode});
-        },
     }
 }
 
@@ -1815,4 +1430,5 @@ pub const Opcode = enum(u7) {
 };
 
 const Hart = @This();
+const hart_debug = @import("hart_debug.zig");
 const std = @import("std");

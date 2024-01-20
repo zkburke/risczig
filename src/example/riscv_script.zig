@@ -11,8 +11,6 @@ extern var funny_value: u32;
 
 export fn modInit() void {
     std.log.info("Hello from modInit!", .{});
-
-    testNativeCall(67);
 }
 
 export fn modDeinit() void {
@@ -116,12 +114,15 @@ pub const std_options = struct {
     ) void {
         const level_txt = comptime message_level.asText();
         const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+        // const stderr = std.io.getStdErr().writer();
 
         var print_buffer: [10 * 1024]u8 = undefined;
 
         const output = std.fmt.bufPrint(&print_buffer, level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
 
         _ = std.os.write(std.os.STDOUT_FILENO, output) catch return;
+
+        // stderr.print(level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
     }
 };
 
