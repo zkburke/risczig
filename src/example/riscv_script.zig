@@ -4,6 +4,10 @@ extern fn lol() callconv(.C) u32;
 
 const TestNativeCallFn = fn (x: u32) callconv(.C) void;
 
+extern fn testNativeCall(x: u32) callconv(.C) void;
+
+extern var funny_value: u32;
+
 pub export fn _start() void {
     std.log.err("{s}", .{global});
 
@@ -28,11 +32,13 @@ pub export fn _start() void {
         native_call_test(9 + 10);
     }
 
-    std.log.err("@returnAddress() = {}", .{@returnAddress()});
+    testNativeCall(21);
 
     const c_return_val = lol();
 
     std.log.err("c_return_val = {}", .{c_return_val});
+
+    std.log.err("@returnAddress() = {}", .{@returnAddress()});
 
     printInt(res + fib_res);
 
@@ -107,8 +113,9 @@ pub const std_options = struct {
 };
 
 pub fn panic(msg: []const u8, stacktrace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+    _ = msg; // autofix
     _ = ret_addr; // autofix
-    std.log.info("panic: {s}", .{msg});
+    // std.log.info("panic: {s}", .{msg});
 
     if (stacktrace != null) {
         std.debug.dumpStackTrace(stacktrace.?.*);

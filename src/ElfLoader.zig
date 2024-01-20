@@ -8,7 +8,12 @@ pub const Loaded = struct {
 
 ///TODO: implement loader using mmap as a specialisation for loading files.
 ///Both loading from a file and from memory should work
-pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
+pub fn load(
+    allocator: std.mem.Allocator,
+    elf_data: []const u8,
+    //ComptimeStringMap(NativeCall, .{...})
+    native_procedures: anytype,
+) !Loaded {
     const header: *const ElfHeader = @ptrCast(elf_data.ptr);
 
     std.debug.assert(std.mem.eql(u8, &header.magic, "\x7fELF"));
@@ -18,7 +23,7 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
     std.debug.assert(header.class == .@"64bit");
     std.debug.assert(header.endianness == .little);
     std.debug.assert(header.machine == .riscv);
-    std.debug.assert(header.type == .exec);
+    std.debug.assert(header.type == .exec or header.type == .dyn);
 
     //TODO: support compressed instructions
     std.debug.assert(!header.flags.riscv_rvc);
@@ -40,7 +45,7 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
 
     for (program_headers) |program_header| {
         switch (program_header.type) {
-            1, 6 => {
+            .load => {
                 minimum_virtual_address = @min(minimum_virtual_address, program_header.vaddr);
 
                 image_size = @max(image_size, program_header.vaddr) - minimum_virtual_address;
@@ -54,16 +59,16 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
 
     std.log.info("minimum_virtual_address = {}", .{minimum_virtual_address});
 
-    const image = allocator.rawAlloc(image_size, 0, @returnAddress()).?;
+    const image = allocator.rawAlloc(image_size, 32, @returnAddress()).?;
 
     @memset(image[0..image_size], undefined);
 
     var stack_alignment: usize = 0;
-    var stack_size: usize = 0;
+    var stack_size: usize = 100 * 1024;
 
     for (program_headers) |program_header| {
         switch (program_header.type) {
-            1, 6 => {
+            .load => {
                 const program_header_data = elf_data[program_header.offset .. program_header.offset + program_header.filesz];
 
                 const base_address = program_header.vaddr - minimum_virtual_address;
@@ -74,9 +79,100 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
 
                 @memset(image[base_address + program_header_data.len .. base_address + program_header_data.len + rest_size], 0);
             },
-            PT_GNU_STACK => {
+            .dynamic => {
+                //parse dynamic symbols
+
+                const dynamic_section = elf_data[program_header.offset .. program_header.offset + program_header.filesz];
+
+                const values_ptr: [*]const Dyn = @alignCast(@ptrCast(dynamic_section));
+                const values = values_ptr[0 .. dynamic_section.len / @sizeOf(Dyn)];
+
+                var relocation_table_size: usize = 0;
+
+                var symbol_table: ?[*]const Sym = null;
+                var string_table: ?[*]const u8 = null;
+                var gnu_hash_table: ?[*]const u32 = null;
+
+                for (values) |value| {
+                    std.log.info("value: tag = {}, val = 0x{x}", .{ value.tag, value.val });
+
+                    switch (value.tag) {
+                        .pltgot => {},
+                        .pltrelsz => {
+                            relocation_table_size = value.val;
+                        },
+                        .symtab => {
+                            std.log.info("symtab = 0x{x}", .{value.val});
+
+                            const offset = value.val;
+
+                            symbol_table = @ptrCast(@alignCast(elf_data.ptr + offset));
+                        },
+                        .strtab => {
+                            const offset = value.val;
+
+                            string_table = @ptrCast(elf_data.ptr + offset);
+                        },
+                        .gnu_hash => {
+                            const offset = value.val;
+
+                            gnu_hash_table = @ptrCast(@alignCast(elf_data.ptr + offset));
+                        },
+                        else => {},
+                    }
+                }
+
+                std.log.info("first symbol: {}", .{symbol_table.?[1]});
+
+                for (values) |value| {
+                    switch (value.tag) {
+                        .pltgot => {},
+                        .jmprel => {
+                            const offset = value.val;
+
+                            const relocation_bytes = elf_data[offset .. offset + relocation_table_size];
+
+                            const relocation_ptr: [*]const RelA = @ptrCast(@alignCast(relocation_bytes.ptr));
+                            const relocations = relocation_ptr[0 .. relocation_bytes.len / @sizeOf(RelA)];
+
+                            for (relocations) |relocation| {
+                                //Location in the file where the address should be relocated
+                                const relocation_offset = relocation.offset;
+
+                                std.log.info("offset: 0x{}, info: 0x{}, addend: {}", .{ relocation.offset, relocation.info, relocation.addend });
+
+                                const symbol = symbol_table.?[relocation.info.sym];
+
+                                std.log.info("relocation symbol: value = 0x{x}", .{symbol.value});
+
+                                const address_ptr: *u64 = @alignCast(@ptrCast(image + relocation_offset));
+
+                                if (symbol.shndx == SHN_UNDEF) {
+                                    //Symbol is undefined and must be resolved by us
+                                    //For now, this ~only~ means resolving a native function from the host
+
+                                    const string_ptr: [*:0]const u8 = @ptrCast(string_table.? + symbol.name);
+
+                                    const string = std.mem.span(string_ptr);
+
+                                    const native_procedure = native_procedures.get(string).?;
+
+                                    address_ptr.* = Hart.nativeCallAddress(native_procedure);
+                                } else {
+                                    //Resolve local symbols from the elf file directly
+                                    //I'm not sure why the program being loaded even has plt symbols which it knows at static link time anyway
+                                    //But ok...
+                                    address_ptr.* = @intFromPtr(image + symbol.value);
+                                }
+                            }
+                        },
+                        else => {},
+                    }
+                }
+            },
+            .gnu_stack => {
                 stack_alignment = program_header.@"align";
-                stack_size = program_header.memsz;
+                stack_size = @max(stack_size, program_header.memsz);
             },
             else => {},
         }
@@ -85,13 +181,63 @@ pub fn load(allocator: std.mem.Allocator, elf_data: []const u8) !Loaded {
     std.log.info("image base = {*}, image size = {}", .{ image, image_size });
 
     //TODO: stack should be local/unique to each hart, not to loaded modules
-    const stack = allocator.rawAlloc(stack_size, @intCast(stack_alignment), @returnAddress()).?;
+    const stack = allocator.rawAlloc(stack_size, 0, @returnAddress()).?;
+
+    std.log.info("stack base = {*}, stack size = {}", .{ stack, stack_size });
 
     return Loaded{
         .image = image[0..image_size],
         .entry_point = header.entry - minimum_virtual_address,
         .stack = stack[0..stack_size],
     };
+}
+
+///Lookup a symbol provided by the host
+fn hostLookup(
+    name: [*:0]const u8,
+) void {
+    _ = name; // autofix
+}
+
+///Lookup a symbol provided by the elf file
+fn guestLookup(
+    string_table: [*:0]const u8,
+    symbol_table: [*]const Sym,
+    hash_table: [*]const u32,
+    name: [*:0]const u8,
+) void {
+    _ = string_table; // autofix
+    _ = symbol_table; // autofix
+    _ = hash_table; // autofix
+    _ = name; // autofix
+}
+
+///Lookup a symbol provided by the elf file using GNU_HASH
+fn gnuLookup(
+    string_table: [*:0]const u8,
+    symbol_table: [*]const Sym,
+    hash_table: [*]const u32,
+    name: [*:0]const u8,
+) void {
+    _ = name; // autofix
+    _ = hash_table; // autofix
+    _ = symbol_table; // autofix
+    _ = string_table; // autofix
+}
+
+///Implementation of DT_GNU_HASH hashing for symbol lookup
+fn gnuHash(name: [*:0]const u8) u32 {
+    var hash: u32 = 5381;
+
+    const char_index = 0;
+
+    while (name[char_index] != 0) {
+        defer char_index += 1;
+
+        hash = (hash << 5) + hash + name[char_index];
+    }
+
+    return hash;
 }
 
 const Endianess = enum(u8) {
@@ -192,9 +338,11 @@ const PF_W = 0x2;
 const PF_R = 0x4;
 const PT_GNU_STACK = 0x6474e551;
 const PT_GNU_RELRO = 0x6474e552;
+///Section index which represents an undefined symbol
+const SHN_UNDEF = 0;
 
 const ProgramHeader = extern struct {
-    type: u32 align(1),
+    type: Type align(1),
     flags: u32 align(1),
     offset: u64 align(1),
     vaddr: u64 align(1),
@@ -202,8 +350,127 @@ const ProgramHeader = extern struct {
     filesz: u64 align(1),
     memsz: u64 align(1),
     @"align": u64 align(1),
+
+    pub const Type = enum(u32) {
+        null = 0,
+        load = 1,
+        dynamic = 2,
+        interp = 3,
+        note = 4,
+        shlib = 5,
+        phdr = 6,
+        tls = 7,
+        num = 8,
+        loos = 0x60000000,
+        gnu_eh_frame = 0x6474e550,
+        gnu_stack = 0x6474e551,
+        gnu_relro = 0x6474e552,
+        sunwbss = 0x6ffffffa,
+        sunwstack = 0x6ffffffb,
+        hisunw = 0x6fffffff,
+        loproc = 0x70000000,
+        hiproc = 0x7fffffff,
+        _,
+    };
 };
 
+const Dyn = extern struct {
+    tag: Tag,
+    val: u64,
+
+    pub const Tag = enum(u64) {
+        null = 0,
+        needed = 1,
+        pltrelsz = 2,
+        pltgot = 3,
+        hash = 4,
+        strtab = 5,
+        symtab = 6,
+        rela = 7,
+        relasz = 8,
+        relaent = 9,
+        strsz = 10,
+        syment = 11,
+        init = 12,
+        fini = 13,
+        soname = 14,
+        rpath = 15,
+        symbolic = 16,
+        rel = 17,
+        relsz = 18,
+        relent = 19,
+        pltrel = 20,
+        jmprel = 23,
+        flags = 30,
+        gnu_hash = 0x6ffffef5,
+        _,
+    };
+};
+
+///Relocation
+const RelA = extern struct {
+    offset: u64,
+    info: Info,
+    addend: u64,
+
+    pub const Info = packed struct(u64) {
+        type: Type,
+        sym: u32,
+
+        pub const Type = enum(u32) {
+            riscv_jump_slot = 5,
+            _,
+        };
+    };
+};
+
+//Symbol found in the symbol table
+const Sym = extern struct {
+    ///Index into the string table
+    name: u32,
+    info: Info,
+    other: u8,
+    shndx: u16,
+    value: u64,
+    size: u64,
+
+    pub fn visibility(self: Sym) Visibility {
+        return @enumFromInt(self.other & 0x03);
+    }
+
+    pub const Info = packed struct(u8) {
+        type: Type,
+        bind: Bind,
+
+        pub const Type = enum(u4) {
+            notype = 0,
+            object = 1,
+            func = 2,
+            section = 3,
+            file = 4,
+            common = 5,
+            tls = 6,
+            _,
+        };
+
+        pub const Bind = enum(u4) {
+            local = 0,
+            global = 1,
+            weak = 2,
+            _,
+        };
+    };
+
+    pub const Visibility = enum(u8) {
+        default = 0,
+        internal = 1,
+        hidden = 2,
+        protected = 3,
+        _,
+    };
+};
+
+//TODO: not strictly needed, in fact the loader should NOT even look at sections
 const SectionHeader = extern struct {
     name: u32 align(1),
     type: u32 align(1),
@@ -218,3 +485,4 @@ const SectionHeader = extern struct {
 };
 
 const std = @import("std");
+const Hart = @import("Hart.zig");

@@ -1,9 +1,10 @@
 //!Implementation for some basic linux ecalls
 
 fn testNativeCall(hart: *Hart) void {
-    _ = hart; // autofix
-
-    std.log.info("hello from testNativeCall, fn p* = {*}", .{&testNativeCall});
+    std.log.info("hello from testNativeCall, fn p* = {*}, a0={}", .{
+        &testNativeCall,
+        hart.registers[10],
+    });
 }
 
 pub fn ecall(vm: *Hart) Hart.InterruptResult {

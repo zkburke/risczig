@@ -100,20 +100,31 @@ pub fn main() !void {
         }
     };
 
-    const riscv_script_file = try std.fs.cwd().openFile("zig-out/bin/riscv_script", .{});
+    const riscv_script_file = try std.fs.cwd().openFile("zig-out/lib/libriscv_script.so", .{});
 
     const elf_data = try riscv_script_file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(elf_data);
     riscv_script_file.close();
 
-    const loaded_module = try ElfLoader.load(allocator, elf_data);
+    const native_procedures = std.ComptimeStringMap(
+        *const Hart.NativeCall,
+        .{
+            .{ "testNativeCall", &testNativeCall },
+        },
+    );
+
+    const loaded_module = try ElfLoader.load(
+        allocator,
+        elf_data,
+        native_procedures,
+    );
     defer allocator.free(loaded_module.image);
     defer allocator.free(loaded_module.stack);
 
     var vm = Hart.init();
     defer vm.deinit();
 
-    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len / 2));
+    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
 
     try vm.execute(
         .{
@@ -122,6 +133,13 @@ pub fn main() !void {
         },
         @alignCast(@ptrCast(&loaded_module.image[loaded_module.entry_point])),
     );
+}
+
+fn testNativeCall(hart: *Hart) void {
+    std.log.info("HELLO from main.zig from testNativeCall, fn p* = {*}, a0={}", .{
+        &testNativeCall,
+        hart.registers[10],
+    });
 }
 
 const linux_ecalls = @import("linux_ecalls.zig");

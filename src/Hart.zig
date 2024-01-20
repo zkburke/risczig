@@ -366,7 +366,7 @@ pub fn execute(
                 switch (masked_instruction) {
                     .addi => {
                         const rs1: i64 = @bitCast(self.registers[i_instruction.rs1]);
-                        const immediate: i64 = @intCast(@as(i12, @bitCast(i_instruction.imm)));
+                        const immediate: i64 = @as(i12, @bitCast(i_instruction.imm));
 
                         const result = rs1 +% immediate;
 
@@ -770,13 +770,11 @@ pub fn execute(
 
                 var result: Result = @bitCast(jump_address);
 
-                //TODO: use low bit of function pointers to indicate native calling
+                //use low bit of function pointers to indicate native calling
                 if (result.zero == 1) {
                     //call native procedure
-                    std.log.info("hart: Native call reached, a0={}", .{self.registers[10]});
 
                     //encode 48bit address space into upper 48 bits of the address, leaving the last 16 bits for 'metadata'
-
                     const encoded_address: u64 = @bitCast(result);
 
                     const native_procedure = nativeCallPointer(encoded_address);
@@ -1141,16 +1139,16 @@ inline fn debugInstruction(self: *const Hart, instruction: u32) void {
 
             switch (masked_instruction) {
                 .sb => {
-                    std.log.info("sb x{}, x{} + 0x{x}", .{ s_instruction.rs2, s_instruction.rs2, s_instruction.imm });
+                    std.log.info("sb x{}, {}(x{})", .{ s_instruction.rs2, offset, s_instruction.rs1 });
                 },
                 .sh => {
-                    std.log.info("sh x{}, x{} + 0x{x}", .{ s_instruction.rs2, s_instruction.rs1, s_instruction.imm });
+                    std.log.info("sh x{}, {}(x{})", .{ s_instruction.rs2, offset, s_instruction.rs1 });
                 },
                 .sw => {
-                    std.log.info("sw x{}, x{} + 0x{x}", .{ s_instruction.rs2, s_instruction.rs2, s_instruction.imm });
+                    std.log.info("sw x{}, {}(x{})", .{ s_instruction.rs2, offset, s_instruction.rs1 });
                 },
                 .sd => {
-                    std.log.info("sd x{}, x{} + 0x{x} (address = {})", .{ s_instruction.rs2, s_instruction.rs1, s_instruction.imm, self.registers[s_instruction.rs1] + s_instruction.imm });
+                    std.log.info("sd x{}, {}(x{})", .{ s_instruction.rs2, offset, s_instruction.rs1 });
                 },
             }
         },

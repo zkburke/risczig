@@ -6,14 +6,14 @@ pub fn build(b: *std.Build) void {
 
     const script_target = b.resolveTargetQuery(.{
         .cpu_arch = .riscv64,
-        .abi = .musl,
+        .abi = .gnu,
         .os_tag = .linux,
         .cpu_features_sub = std.Target.riscv.featureSet(&.{
             .c,
         }),
     });
 
-    const riscv_script = b.addExecutable(.{
+    const riscv_script = b.addSharedLibrary(.{
         .name = "riscv_script",
         .root_source_file = .{ .path = "src/example/riscv_script.zig" },
         .target = script_target,
@@ -22,9 +22,20 @@ pub fn build(b: *std.Build) void {
         .link_libc = false,
         .single_threaded = true,
         .pic = true,
-        .strip = false,
-        .linkage = .static,
+        .strip = true,
     });
+
+    // riscv_script.link_gc_sections = true;
+    // riscv_script.link_function_sections = true;
+    // riscv_script.link_data_sections = true;
+    // riscv_script.link_z_lazy = false;
+    // riscv_script.link_z_relro = true;
+
+    const asm_path = riscv_script.getEmittedAsm();
+
+    const install_file = b.addInstallFile(asm_path, "asm.asm");
+
+    b.getInstallStep().dependOn(&install_file.step);
 
     //link some c in as well
     riscv_script.addCSourceFile(.{
