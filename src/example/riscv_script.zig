@@ -9,6 +9,18 @@ extern fn puts(string: [*:0]const u8) callconv(.C) void;
 
 extern var funny_value: u32;
 
+export fn modInit() void {
+    std.log.info("Hello from modInit!", .{});
+
+    testNativeCall(67);
+}
+
+export fn modDeinit() void {
+    std.log.info("Hello from modDenit!", .{});
+
+    testNativeCall(4);
+}
+
 pub export fn _start() void {
     std.log.err("{s}", .{global});
 
@@ -19,8 +31,6 @@ pub export fn _start() void {
     const res = factorial(@intCast(gimmeANumber()));
 
     std.log.err("double lol: fact_res = {}", .{res});
-
-    @breakpoint();
 
     // const native_call_address: usize = if (zero(res) == 0) 0x00000000_00000001 else 0;
     const native_call_address: usize = specialCall(1026, 0);
@@ -39,13 +49,13 @@ pub export fn _start() void {
 
     puts("Hello, world from zig");
 
-    if (true) unreachable;
-
     std.log.err("c_return_val = {}", .{c_return_val});
 
     std.log.err("@returnAddress() = {}", .{@returnAddress()});
 
     printInt(res + fib_res);
+
+    if (true) unreachable;
 
     printInt(res);
 
@@ -104,26 +114,58 @@ pub const std_options = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
-        _ = scope; // autofix
+        const level_txt = comptime message_level.asText();
+        const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
 
-        var fmt_buf: [1024]u8 = undefined;
+        var print_buffer: [10 * 1024]u8 = undefined;
 
-        _ = std.os.write(std.os.STDERR_FILENO, @tagName(message_level) ++ ": ") catch unreachable;
+        const output = std.fmt.bufPrint(&print_buffer, level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
 
-        const printed_word = std.fmt.bufPrint(&fmt_buf, format, args) catch unreachable;
-
-        _ = std.os.write(std.os.STDERR_FILENO, printed_word) catch unreachable;
-        _ = std.os.write(std.os.STDERR_FILENO, "\n") catch unreachable;
+        _ = std.os.write(std.os.STDOUT_FILENO, output) catch return;
     }
 };
 
 pub fn panic(msg: []const u8, stacktrace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
-    _ = msg; // autofix
-    _ = ret_addr; // autofix
     // std.log.info("panic: {s}", .{msg});
+    // std.log.info("stacktrace = {*}", .{stacktrace});
 
-    if (stacktrace != null) {
-        std.debug.dumpStackTrace(stacktrace.?.*);
+    _ = std.io.getStdErr().write("panic: ") catch 0;
+    _ = std.io.getStdErr().write(msg) catch 0;
+    _ = std.io.getStdErr().write("\n") catch 0;
+
+    _ = stacktrace;
+    if (false) {
+        var stack_trace: std.builtin.StackTrace = undefined;
+
+        std.debug.captureStackTrace(ret_addr, &stack_trace);
+
+        @breakpoint();
+
+        var buffer_writer: std.io.FixedBufferStream([1024]u8) = undefined;
+
+        const writer = buffer_writer.writer();
+
+        var fixed_buffer: [1024]u8 = undefined;
+
+        var fba = std.heap.FixedBufferAllocator.init(&fixed_buffer);
+
+        var arena = std.heap.ArenaAllocator.init(fba.allocator());
+        defer arena.deinit();
+
+        const tty_config: std.io.tty.Config = .no_color;
+
+        _ = tty_config;
+
+        writer.writeAll("\n") catch unreachable;
+
+        // std.debug.writeStackTrace(stack_trace, writer, arena.allocator(), debug_info, tty_config) catch |err| {
+        //     writer.print("Unable to print stack trace: {s}\n", .{@errorName(err)}) catch unreachable;
+        // };
+
+        // std.debug.dumpStackTrace(stack_trace);
+        // stack_trace.format("", .{}, buffer_writer.writer()) catch {
+        //     std.os.exit(255);
+        // };
     }
 
     std.os.exit(1);

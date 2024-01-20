@@ -96,7 +96,7 @@ pub fn main() !void {
                 std.log.info("x{} = 0x{x}", .{ register, value });
             }
 
-            return .pass;
+            return .halt;
         }
     };
 
@@ -115,16 +115,36 @@ pub fn main() !void {
         },
     );
 
+    //Procedures we want to import from the script
+    const imported_symbol_names = [_][:0]const u8{
+        "modInit",
+        "modDeinit",
+    };
+
+    var imported_symbol_addresses: [2]u64 = undefined;
+
     const loaded_module = try ElfLoader.load(
         allocator,
         elf_data,
         native_procedures,
+        &imported_symbol_names,
+        &imported_symbol_addresses,
     );
     defer allocator.free(loaded_module.image);
     defer allocator.free(loaded_module.stack);
 
+    std.log.info("imported_symbol_addresses = {x}", .{imported_symbol_addresses});
+
     var vm = Hart.init();
     defer vm.deinit();
+
+    //The entry point specified in the elf header
+    const entry_point: [*]const u32 = @alignCast(@ptrCast(&loaded_module.image[loaded_module.entry_point]));
+
+    _ = entry_point;
+
+    const mod_init_address: [*]const u32 = @ptrFromInt(imported_symbol_addresses[0]);
+    const mod_deinit_address: [*]const u32 = @ptrFromInt(imported_symbol_addresses[1]);
 
     vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
 
@@ -133,14 +153,25 @@ pub fn main() !void {
             .ecall_handler = linux_ecalls.ecall,
             .ebreak_handler = Handlers.ebreak,
         },
-        @alignCast(@ptrCast(&loaded_module.image[loaded_module.entry_point])),
+        mod_init_address,
+    );
+
+    vm.resetRegisters();
+    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+
+    try vm.execute(
+        .{
+            .ecall_handler = linux_ecalls.ecall,
+            .ebreak_handler = Handlers.ebreak,
+        },
+        mod_deinit_address,
     );
 }
 
 fn nativePuts(string: [*:0]const u8) callconv(.C) void {
     std.log.info("{*}", .{string});
 
-    // _ = std.io.getStdErr().write(std.mem.span(string)) catch unreachable;
+    _ = std.io.getStdErr().write(std.mem.span(string)) catch unreachable;
     _ = std.io.getStdErr().write("\n") catch unreachable;
 }
 

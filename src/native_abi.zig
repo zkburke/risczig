@@ -24,8 +24,6 @@ pub fn nativeCallWrapper(comptime function: anytype) Hart.NativeCall {
                 );
             }
 
-            std.log.info("args = {}", .{args});
-
             @call(.always_inline, function, args);
 
             //TODO: handle return

@@ -13,6 +13,10 @@ pub fn load(
     elf_data: []const u8,
     //ComptimeStringMap(NativeCall, .{...})
     native_procedures: anytype,
+    //names of procedures the loader should import from the elf file
+    import_procedure_names: []const [:0]const u8,
+    //Where the loader should write the corresponding addreses of import_procedure_names
+    import_procedure_addresses: []u64,
 ) !Loaded {
     const header: *const ElfHeader = @ptrCast(elf_data.ptr);
 
@@ -91,7 +95,7 @@ pub fn load(
                 var relocation_table_size: usize = 0;
 
                 var symbol_table: ?[*]const Sym = null;
-                var string_table: ?[*]const u8 = null;
+                var string_table: ?[*:0]const u8 = null;
                 var gnu_hash_table: ?[*]const u32 = null;
 
                 for (values) |value| {
@@ -174,6 +178,23 @@ pub fn load(
                         else => {},
                     }
                 }
+
+                for (import_procedure_names, 0..) |import_name, import_index| {
+                    const maybe_symbol = guestLookup(
+                        string_table.?,
+                        symbol_table.?,
+                        gnu_hash_table.?,
+                        import_name,
+                    );
+
+                    if (maybe_symbol) |symbol| {
+                        import_procedure_addresses[import_index] = @intFromPtr(image + symbol.value);
+                    } else {
+                        std.log.info("loader: unable to resolve symbol '{s}' from elf object", .{import_name});
+
+                        return error.SymbolResolutionFailed;
+                    }
+                }
             },
             .gnu_stack => {
                 stack_alignment = program_header.@"align";
@@ -203,6 +224,8 @@ fn hostLookup(
     name: [*:0]const u8,
 ) void {
     _ = name; // autofix
+
+    @compileError("Unimplemented");
 }
 
 ///Lookup a symbol provided by the elf file
@@ -211,11 +234,23 @@ fn guestLookup(
     symbol_table: [*]const Sym,
     hash_table: [*]const u32,
     name: [*:0]const u8,
-) void {
-    _ = string_table; // autofix
-    _ = symbol_table; // autofix
-    _ = hash_table; // autofix
-    _ = name; // autofix
+) ?*const Sym {
+    //TODO: we should be able to revert to hash or even iterative lookup in case certain parts are missing in the dynamic segment
+    const lookup_method: enum {
+        iterative_lookup,
+        hash,
+        gnu_hash,
+    } = .gnu_hash;
+
+    return switch (lookup_method) {
+        .gnu_hash => gnuLookup(
+            string_table,
+            symbol_table,
+            hash_table,
+            @ptrCast(name),
+        ),
+        else => @compileError("Unsupported lookup method"),
+    };
 }
 
 ///Lookup a symbol provided by the elf file using GNU_HASH
@@ -224,26 +259,96 @@ fn gnuLookup(
     symbol_table: [*]const Sym,
     hash_table: [*]const u32,
     name: [*:0]const u8,
-) void {
-    _ = name; // autofix
-    _ = hash_table; // autofix
-    _ = symbol_table; // autofix
-    _ = string_table; // autofix
+) ?*const Sym {
+    const name_hash = gnuHash(name);
+
+    //TODO: is this right?
+    const bloom_el_t = u64;
+
+    const nbuckets = hash_table[0];
+    const symoffset = hash_table[1];
+    const bloom_size = hash_table[2];
+    const bloom_shift = hash_table[3];
+    const bloom: [*]const bloom_el_t = @alignCast(@ptrCast(&hash_table[4]));
+    const buckets: [*]const u32 = @ptrCast(&bloom[bloom_size]);
+    const chain: [*]const u32 = buckets + nbuckets;
+
+    const elf_class_bits = @bitSizeOf(u64);
+
+    comptime std.debug.assert(elf_class_bits == 64);
+
+    const word = bloom[(name_hash / elf_class_bits) % bloom_size];
+
+    const mask: u64 = 0 | (@as(bloom_el_t, 1) << @as(u5, @truncate(name_hash % elf_class_bits))) | (@as(bloom_el_t, 1) << @as(u5, @truncate((name_hash >> @as(u5, @truncate(bloom_shift))) % elf_class_bits)));
+
+    if (word & mask != mask) {
+        //TODO: Look into this; I don't think this is right, as when I uncomment this, no symbols are resolved
+        //return null;
+    }
+
+    var symbol_index = buckets[name_hash % nbuckets];
+
+    if (symbol_index < symoffset) {
+        return null;
+    }
+
+    while (true) : (symbol_index += 1) {
+        const symbol_name = string_table + symbol_table[symbol_index].name;
+        const hash = chain[symbol_index - symoffset];
+
+        if (name_hash | 1 == hash | 1 and strEql(symbol_name, name)) {
+            return &symbol_table[symbol_index];
+        }
+
+        if (hash & 1 != 0) {
+            break;
+        }
+    }
+
+    return null;
+}
+
+fn hashLookup() void {
+    @compileError("Unimplemented");
+}
+
+fn strEql(a: [*:0]const u8, b: [*:0]const u8) bool {
+    if (true) {
+        return std.mem.eql(u8, std.mem.span(a), std.mem.span(b));
+    }
+
+    var index: usize = 0;
+
+    while (a[index] == b[index]) {
+        if (a[index] == 0) {
+            return true;
+        }
+
+        index += 1;
+    }
+
+    return false;
 }
 
 ///Implementation of DT_GNU_HASH hashing for symbol lookup
 fn gnuHash(name: [*:0]const u8) u32 {
     var hash: u32 = 5381;
 
-    const char_index = 0;
+    var char_index: usize = 0;
 
     while (name[char_index] != 0) {
         defer char_index += 1;
 
-        hash = (hash << 5) + hash + name[char_index];
+        hash = (hash << 5) +% hash +% name[char_index];
     }
 
     return hash;
+}
+
+//Ensure gnuHash works
+comptime {
+    std.debug.assert(gnuHash("") == 0x00001505);
+    std.debug.assert(gnuHash("printf") == 0x156b2bb8);
 }
 
 const Endianess = enum(u8) {

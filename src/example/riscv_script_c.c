@@ -1,4 +1,4 @@
-#include <stdint.h>
+#include "stdint.h"
 #include "stddef.h"
 
 //print function defined by our zig file
@@ -17,7 +17,7 @@ int funny_value = 21;
 int lol() {
     zprint("hello from c");
 
-    printf("Hello printf!");
+    puts("Hello printf!");
 
     int res = 0;
 
@@ -27,7 +27,7 @@ int lol() {
         res = i;
     }
 
-    printf("res = %i");
+    puts("res = %i");
 
     return res;
 }

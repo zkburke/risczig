@@ -67,6 +67,11 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
 
             a0.* = @bitCast(std.time.milliTimestamp());
         },
+        .msync => {
+            const a0 = &vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
+
+            a0.* = 0;
+        },
         //custom syscalls
         .gimme_a_number => {
             vm.registers[@intFromEnum(Hart.AbiRegister.a0)] = 5;
@@ -93,6 +98,7 @@ pub const ECallCode = enum(u16) {
     write = 64,
     rt_sigaction = 134,
     clock_gettime = 403,
+    msync = 227,
 
     //temporary debugging ecalls, not linux ones
     gimme_a_number = 1025,

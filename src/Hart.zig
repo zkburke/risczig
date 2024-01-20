@@ -15,6 +15,11 @@ pub fn deinit(self: *Hart) void {
     self.* = undefined;
 }
 
+pub fn resetRegisters(self: *Hart) void {
+    self.registers = std.mem.zeroes([32]u64);
+    self.program_counter = undefined;
+}
+
 pub inline fn readRegister(self: *Hart, register: u5) u64 {
     if (register == 0) return 0;
 
@@ -75,7 +80,7 @@ pub fn execute(
     ///Instruction address that will be executed
     address: [*]const u32,
 ) ExecuteError!void {
-    const debug_instructions = true;
+    const debug_instructions = false;
 
     //Using a local program counter allows it to be put into a register
     //As such, all instructions should read and write this program counter, NOT the program counter stored in the hart

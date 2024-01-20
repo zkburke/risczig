@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
         .single_threaded = true,
         .pic = true,
         .strip = true,
+        .error_tracing = true,
     });
 
     // riscv_script.link_gc_sections = true;
