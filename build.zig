@@ -104,15 +104,16 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 
+    const include_riscv_tests = b.option(bool, "include_riscv_tests", "Compile the risc-v-tests test suite") orelse false;
+
     //Compile All riscv-test assembly files into their own seperate objects
     //We *should* be able to use clang
-    {
+    if (include_riscv_tests) {
         const test_runner = b.addExecutable(.{
             .name = "risczig_test_runner",
             .root_source_file = .{ .path = "test/vm/test_runner.zig" },
             .target = b.host,
             .optimize = .Debug,
-            .link_libc = true,
         });
 
         test_runner.root_module.addAnonymousImport("risczig", .{ .root_source_file = .{

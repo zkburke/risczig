@@ -42,3 +42,10 @@ the VM is embedded in is modelled as the supervisor.
 risczig can be used with the Zig package manager. It has no non Zig
 dependencies. It is meant to be used as a library and embedded into another
 application.
+
+# Testing
+
+Test the Vm ISA using the riscv-tests repo. Requires cloning
+https://github.com/riscv-software-src/riscv-tests.git into 'test/lib/'.
+
+`zig build test -Dinclude_riscv_tests=true`
