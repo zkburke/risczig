@@ -28,6 +28,10 @@ pub export fn _start() void {
 
     log.err("{s}", .{global});
 
+    const nul_addr: *u32 = if (funny_value == 21) undefined else &funny_value;
+
+    nul_addr.* = 0;
+
     const fib_res: i32 = @intCast(fib(10));
 
     log.err("lol: fib_res = {}", .{fib_res});
