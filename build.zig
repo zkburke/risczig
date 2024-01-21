@@ -4,6 +4,10 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const risczig_module = b.addModule("risczig", .{
+        .root_source_file = .{ .path = b.pathFromRoot("src/root.zig") },
+    });
+
     const script_target = b.resolveTargetQuery(.{
         .cpu_arch = .riscv64,
         .abi = .gnu,
@@ -116,9 +120,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = .Debug,
         });
 
-        test_runner.root_module.addAnonymousImport("risczig", .{ .root_source_file = .{
-            .path = b.pathFromRoot("src/root.zig"),
-        } });
+        test_runner.root_module.addImport("risczig", risczig_module);
 
         const test_riscv_target = b.resolveTargetQuery(.{
             .cpu_arch = .riscv64,
