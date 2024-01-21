@@ -9,53 +9,48 @@ extern fn puts(string: [*:0]const u8) callconv(.C) void;
 
 extern var funny_value: u32;
 
+const log = std.log.scoped(.riscv_script);
+
 export fn modInit() void {
-    std.log.info("Hello from modInit!", .{});
+    log.info("Hello from modInit! initial funny_value = {}", .{funny_value});
+
+    funny_value += 13;
 }
 
 export fn modDeinit() void {
-    std.log.info("Hello from modDenit!", .{});
+    log.info("Hello from modDenit! final funny_value = {}", .{funny_value});
 
-    testNativeCall(4);
+    testNativeCall(funny_value);
 }
 
 pub export fn _start() void {
-    std.log.err("{s}", .{global});
+    log.info("Hello from _start! initial funny_value = {}", .{funny_value});
+
+    log.err("{s}", .{global});
 
     const fib_res: i32 = @intCast(fib(10));
 
-    std.log.err("lol: fib_res = {}", .{fib_res});
+    log.err("lol: fib_res = {}", .{fib_res});
 
     const res = factorial(@intCast(gimmeANumber()));
 
-    std.log.err("double lol: fact_res = {}", .{res});
+    log.err("double lol: fact_res = {}", .{res});
 
-    // const native_call_address: usize = if (zero(res) == 0) 0x00000000_00000001 else 0;
-    const native_call_address: usize = specialCall(1026, 0);
-
-    {
-        @setRuntimeSafety(false);
-
-        const native_call_test: *const TestNativeCallFn = @ptrFromInt(native_call_address);
-
-        native_call_test(9 + 10);
-    }
-
-    testNativeCall(21);
+    testNativeCall(funny_value);
 
     const c_return_val = lol();
 
+    testNativeCall(funny_value);
+
     puts("Hello, world from zig");
 
-    std.log.err("c_return_val = {}", .{c_return_val});
+    log.err("c_return_val = {}", .{c_return_val});
 
-    std.log.err("@returnAddress() = {}", .{@returnAddress()});
+    log.err("@returnAddress() = {}", .{@returnAddress()});
 
     printInt(res + fib_res);
 
-    if (true) unreachable;
-
-    printInt(res);
+    printInt(@divTrunc(res, zero(0)));
 
     for (3..10) |_| printInt(res);
 
@@ -63,7 +58,7 @@ pub export fn _start() void {
 }
 
 export fn zprint(str: [*:0]const u8) void {
-    std.log.err("c string: {s}", .{std.mem.span(str)});
+    log.err("c string: {s}", .{std.mem.span(str)});
 }
 
 fn zero(x: i32) i32 {
@@ -89,7 +84,7 @@ fn factorial(x: i32) i32 {
 }
 
 pub fn printInt(x: i32) void {
-    std.log.err("printInt = {}", .{x});
+    log.err("printInt = {}", .{x});
 }
 
 pub fn gimmeANumber() u32 {
@@ -114,7 +109,6 @@ pub const std_options = struct {
     ) void {
         const level_txt = comptime message_level.asText();
         const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-        // const stderr = std.io.getStdErr().writer();
 
         var print_buffer: [10 * 1024]u8 = undefined;
 
@@ -122,6 +116,7 @@ pub const std_options = struct {
 
         _ = std.os.write(std.os.STDOUT_FILENO, output) catch return;
 
+        // const stderr = std.io.getStdErr().writer();
         // stderr.print(level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
     }
 };

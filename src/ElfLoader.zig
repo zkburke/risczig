@@ -98,6 +98,8 @@ pub fn load(
                 var string_table: ?[*:0]const u8 = null;
                 var gnu_hash_table: ?[*]const u32 = null;
 
+                var rel_size: ?usize = null;
+
                 for (values) |value| {
                     std.log.info("value: tag = {}, val = 0x{x}", .{ value.tag, value.val });
 
@@ -105,6 +107,9 @@ pub fn load(
                         .pltgot => {},
                         .pltrelsz => {
                             relocation_table_size = value.val;
+                        },
+                        .relasz => {
+                            rel_size = value.val;
                         },
                         .symtab => {
                             std.log.info("symtab = 0x{x}", .{value.val});
@@ -132,6 +137,42 @@ pub fn load(
                 for (values) |value| {
                     switch (value.tag) {
                         .pltgot => {},
+                        .rela => {
+                            std.log.info("rela = 0x{x}", .{value.val});
+
+                            const offset = value.val;
+
+                            const relocation_bytes = elf_data[offset .. offset + relocation_table_size];
+
+                            const relocation_ptr: [*]const RelA = @ptrCast(@alignCast(relocation_bytes.ptr));
+                            const relocations = relocation_ptr[0 .. relocation_bytes.len / @sizeOf(RelA)];
+
+                            for (relocations) |relocation| {
+                                std.log.info("{}", .{relocation});
+
+                                const address_ptr: *u64 = @alignCast(@ptrCast(image + relocation.offset));
+
+                                const symbol: ?Sym = if (relocation.info.sym != 0) symbol_table.?[relocation.info.sym] else null;
+
+                                switch (relocation.info.type) {
+                                    .riscv_64 => {
+                                        address_ptr.* = @intFromPtr(image) + relocation.addend;
+
+                                        if (symbol != null) {
+                                            address_ptr.* += symbol.?.value;
+                                        }
+                                    },
+                                    .riscv_relative => {
+                                        address_ptr.* = @intFromPtr(image) + relocation.addend;
+
+                                        if (symbol != null) {
+                                            address_ptr.* += symbol.?.value;
+                                        }
+                                    },
+                                    else => {},
+                                }
+                            }
+                        },
                         .jmprel => {
                             const offset = value.val;
 
@@ -143,6 +184,8 @@ pub fn load(
                             for (relocations) |relocation| {
                                 //Location in the file where the address should be relocated
                                 const relocation_offset = relocation.offset;
+
+                                std.debug.assert(relocation.info.type == .riscv_jump_slot);
 
                                 std.log.info("offset: 0x{}, info: 0x{}, addend: {}", .{ relocation.offset, relocation.info, relocation.addend });
 
@@ -167,13 +210,16 @@ pub fn load(
                                             return error.SymbolFailure;
                                         };
 
+                                        //Binaries must not try to do pointer arithmetic on native procedure addresses
+                                        std.debug.assert(relocation.addend == 0);
+
                                         address_ptr.* = Hart.nativeCallAddress(native_procedure);
                                     }
                                 } else {
                                     //Resolve local symbols from the elf file directly
                                     //I'm not sure why the program being loaded even has plt symbols which it knows at static link time anyway
                                     //But ok...
-                                    address_ptr.* = @intFromPtr(image + symbol.value);
+                                    address_ptr.* = @intFromPtr(image + symbol.value + relocation.addend);
                                 }
                             }
                         },
@@ -531,6 +577,8 @@ const RelA = extern struct {
         sym: u32,
 
         pub const Type = enum(u32) {
+            riscv_64 = 2,
+            riscv_relative = 3,
             riscv_jump_slot = 5,
             _,
         };

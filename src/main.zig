@@ -150,6 +150,7 @@ pub fn main() !void {
         .{
             .ecall_handler = linux_ecalls.ecall,
             .ebreak_handler = Handlers.ebreak,
+            .debug_instructions = false,
         },
         entry_point,
     );
@@ -178,8 +179,6 @@ pub fn main() !void {
 }
 
 fn nativePuts(string: [*:0]const u8) callconv(.C) void {
-    std.log.info("{*}", .{string});
-
     _ = std.io.getStdErr().write(std.mem.span(string)) catch unreachable;
     _ = std.io.getStdErr().write("\n") catch unreachable;
 }

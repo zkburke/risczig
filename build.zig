@@ -26,12 +26,6 @@ pub fn build(b: *std.Build) !void {
         .error_tracing = true,
     });
 
-    // riscv_script.link_gc_sections = true;
-    // riscv_script.link_function_sections = true;
-    // riscv_script.link_data_sections = true;
-    // riscv_script.link_z_lazy = false;
-    // riscv_script.link_z_relro = true;
-
     const asm_path = riscv_script.getEmittedAsm();
 
     const install_file = b.addInstallFile(asm_path, "asm.asm");

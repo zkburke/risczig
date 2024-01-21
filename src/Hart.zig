@@ -72,6 +72,15 @@ pub const ExecuteError = error{
     UnsupportedInstruction,
 };
 
+///Compile time configuration for how an execute function should work
+pub const ExecuteConfig = struct {
+    ecall_handler: ?fn (vm: *Hart) InterruptResult = null,
+    ebreak_handler: ?fn (vm: *Hart) InterruptResult = null,
+    ///Trace each instruction by logging them
+    //TODO: allow the user of this function to supply a trap function (at compile time) which is called before an instruciton is executed
+    debug_instructions: bool = false,
+};
+
 ///Execute a stream of RISC-V instructions located in memory
 ///The executing program will view this as identical to a jal/jalr to this address
 pub fn execute(
@@ -80,7 +89,11 @@ pub fn execute(
     ///Instruction address that will be executed
     address: [*]const u32,
 ) ExecuteError!void {
-    const debug_instructions = false;
+    //TODO: use @optimizeFor when it's implemented in the compiler, using ReleaseFast by default.
+    //Even when compiling a program for Debug, it makes sense to optimize the interpreter loop and disable safety checks
+    //The interpreter loop should be written to the risc-v specification, and safety checks are not needed
+    //When in a test, we are testing the correctness of the interpreter, so safety should be turned on
+    @setRuntimeSafety(@import("builtin").is_test);
 
     //Using a local program counter allows it to be put into a register
     //As such, all instructions should read and write this program counter, NOT the program counter stored in the hart
@@ -94,7 +107,7 @@ pub fn execute(
         const instruction = program_counter[0];
         const instruction_generic: InstructionGeneric = @bitCast(instruction);
 
-        if (debug_instructions) {
+        if (config.debug_instructions) {
             self.program_counter = program_counter;
 
             hart_debug.debugInstruction(self, instruction);
@@ -236,7 +249,7 @@ pub fn execute(
                         const a: u64 = self.registers[r_instruction.rs1];
                         const b: u64 = self.registers[r_instruction.rs2];
 
-                        const result = @rem(a, b);
+                        const result = if (b != 0) @rem(a, b) else a;
 
                         self.setRegister(r_instruction.rd, result);
                     },
@@ -262,7 +275,7 @@ pub fn execute(
                     },
                     .mulhsu => {
                         const rs1: i64 = @bitCast(self.registers[r_instruction.rs1]);
-                        const rs2: i64 = @intCast(self.registers[r_instruction.rs2]);
+                        const rs2: i65 = @intCast(self.registers[r_instruction.rs2]);
 
                         const result: i128 = rs1 *% rs2;
 
@@ -271,21 +284,20 @@ pub fn execute(
                         self.setRegister(r_instruction.rd, @bitCast(upper));
                     },
                     .div => {
-                        const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
-                        const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
+                        const dividend: i64 = @bitCast(self.registers[r_instruction.rs1]);
+                        const divisor: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        //TODO: handle division by zero
-                        @setRuntimeSafety(false);
+                        const result: i64 = if (divisor != 0) @divTrunc(dividend, divisor) else -1;
 
-                        const result: i64 = @divTrunc(a, b);
+                        const actual_result = if (dividend == std.math.minInt(i64) and divisor == -1) dividend else result;
 
-                        self.setRegister(r_instruction.rd, @bitCast(result));
+                        self.setRegister(r_instruction.rd, @bitCast(actual_result));
                     },
                     .divu => {
                         const a: u64 = self.registers[r_instruction.rs1];
                         const b: u64 = self.registers[r_instruction.rs2];
 
-                        const result = a / b;
+                        const result = if (b != 0) @divTrunc(a, b) else std.math.maxInt(u64);
 
                         self.setRegister(r_instruction.rd, result);
                     },
@@ -293,7 +305,7 @@ pub fn execute(
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        const result: i64 = @rem(a, b);
+                        const result: i64 = if (b != 0) @rem(a, b) else a;
 
                         self.setRegister(r_instruction.rd, @bitCast(result));
                     },
@@ -371,7 +383,7 @@ pub fn execute(
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        const result: i32 = @truncate(@divTrunc(a, b));
+                        const result: i32 = if (b != 0) @truncate(@divTrunc(a, b)) else -1;
                         const sign_extended: i64 = @intCast(result);
 
                         self.setRegister(r_instruction.rd, @bitCast(sign_extended));
@@ -380,7 +392,7 @@ pub fn execute(
                         const a: u64 = self.registers[r_instruction.rs1];
                         const b: u64 = self.registers[r_instruction.rs2];
 
-                        const result: u32 = @truncate(a / b);
+                        const result: u32 = if (b != 0) @truncate(@divTrunc(a, b)) else std.math.maxInt(u32);
 
                         self.setRegister(r_instruction.rd, result);
                     },
@@ -821,22 +833,20 @@ pub fn execute(
 
                     native_procedure(self);
 
-                    //jump to next instruction after jalr, emulating the effect of a ret
-                    program_counter += 1;
+                    //return to the return address, as if the native function had done so
+                    program_counter = @ptrFromInt(self.registers[@intFromEnum(AbiRegister.ra)]);
+                } else {
+                    result.zero = 0;
 
-                    continue;
+                    const actual_address: u64 = @bitCast(result);
+
+                    //TODO: when jalring to a special address, yield the interpreter (to be used when the host calls into the vm)
+                    if (actual_address == 0) {
+                        return;
+                    }
+
+                    program_counter = @ptrFromInt(actual_address);
                 }
-
-                result.zero = 0;
-
-                const actual_address: u64 = @bitCast(result);
-
-                //TODO: when jalring to a special address, yield the interpreter (to be used when the host calls into the vm)
-                if (actual_address == 0) {
-                    return;
-                }
-
-                program_counter = @ptrFromInt(actual_address);
             },
             .system => {
                 const i_instruction: InstructionI = @bitCast(instruction);
@@ -1273,12 +1283,6 @@ pub const InterruptResult = enum {
     pass,
     ///Execution halts
     halt,
-};
-
-///Compile time configuration for how an execute function should work
-pub const ExecuteConfig = struct {
-    ecall_handler: ?fn (vm: *Hart) InterruptResult = null,
-    ebreak_handler: ?fn (vm: *Hart) InterruptResult = null,
 };
 
 pub const Register = enum(u5) {
