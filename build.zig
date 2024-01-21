@@ -114,6 +114,7 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = .{ .path = "test/vm/test_runner.zig" },
             .target = b.host,
             .optimize = .Debug,
+            .link_libc = true,
         });
 
         test_runner.root_module.addAnonymousImport("risczig", .{ .root_source_file = .{

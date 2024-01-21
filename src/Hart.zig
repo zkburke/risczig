@@ -918,7 +918,7 @@ pub fn execute(
                             }
                         }
                     },
-                    else => return error.IllegalInstruction,
+                    else => {},
                 }
 
                 program_counter += 1;
