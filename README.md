@@ -1,5 +1,7 @@
 # A RISC-V interpreter written in zig
 
+# Introduction
+
 A pure Zig implementation of an RV64IAMFD-ziscr-zfence interpreter with the
 intent of being embedded and used for plugin/mod/scripting systems.
 
@@ -20,3 +22,23 @@ Randomization) in its simplest form.
 This project can be thought of as an exploratory leap from my other project that
 attempted to achieve this in a way that I _think_ RISC-V does better
 https://github.com/zkburke/callisto
+
+# Instruction Set and Extensions
+
+Below are a list of extensions that will be supported. All of these extensions
+are the unprivileged instruction sets, as risczig implements the unprivileged
+mode, as the guest program is treated as a user mode program, and the host that
+the VM is embedded in is modelled as the supervisor.
+
+- [x] RV64I - 64 bit Base Integer Instruction Set
+- [x] M - Standard Extension for Integer Multiplication and Division
+- [ ] A - Standard Extension for Atomic Instructions
+- [ ] F - Standard Extension for Single-Precision Floating-Point
+- [ ] D - Standard Extension for Double-Precision Floating-Point
+- [x] ZiFencei - Instruction-Fetch Fence
+
+# Building and Usage
+
+risczig can be used with the Zig package manager. It has no non Zig
+dependencies. It is meant to be used as a library and embedded into another
+application.
