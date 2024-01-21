@@ -49,7 +49,6 @@ pub fn build(b: *std.Build) !void {
             .target = script_target,
             .optimize = .Debug,
             .use_llvm = true,
-            .link_libc = true,
             .single_threaded = true,
             .pic = true,
             .strip = false,
@@ -69,7 +68,6 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
     });
 
     b.installArtifact(exe);

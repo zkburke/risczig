@@ -150,7 +150,7 @@ pub fn main() !void {
         .{
             .ecall_handler = linux_ecalls.ecall,
             .ebreak_handler = Handlers.ebreak,
-            .debug_instructions = true,
+            .debug_instructions = false,
         },
         entry_point,
     );
