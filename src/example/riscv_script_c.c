@@ -25,6 +25,10 @@ int lol() {
         res = i;
     }
 
+    int* ptr = 0;
+
+    *ptr = 10;
+
     puts("res = %i");
 
     return res;

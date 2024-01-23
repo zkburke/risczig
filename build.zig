@@ -76,6 +76,14 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(exe);
 
+    {
+        const exe_asm_path = exe.getEmittedAsm();
+
+        const exe_install_file = b.addInstallFile(exe_asm_path, "example_host.asm");
+
+        b.getInstallStep().dependOn(&exe_install_file.step);
+    }
+
     const run_cmd = b.addRunArtifact(exe);
 
     run_cmd.step.dependOn(b.getInstallStep());
@@ -216,4 +224,48 @@ pub fn build(b: *std.Build) !void {
             }
         }
     }
+
+    const benchmark_step = b.step("benchmark", "Run benchmarks");
+
+    const benchmark_exe = b.addExecutable(.{
+        .name = "benchmark",
+        .target = b.host,
+        //TODO: optimize for ReleaseFast
+        .optimize = .Debug,
+        .root_source_file = .{ .path = b.pathFromRoot("benchmark/main.zig") },
+    });
+
+    benchmark_exe.root_module.addImport("risczig", risczig_module);
+
+    const run_benchmark_step = b.addRunArtifact(benchmark_exe);
+
+    run_benchmark_step.addArg("10000");
+
+    benchmark_step.dependOn(&run_benchmark_step.step);
+
+    const riscv_benchmark_library = b.addSharedLibrary(.{
+        .name = "factorial",
+        .root_source_file = .{ .path = "benchmark/shared/numeric/factorial.zig" },
+        .target = script_target,
+        .optimize = .ReleaseSmall,
+        .use_llvm = true,
+        .link_libc = false,
+        .single_threaded = true,
+        .pic = true,
+        .strip = true,
+        .error_tracing = false,
+    });
+
+    riscv_benchmark_library.entry = .{ .symbol_name = "factorialRecursive" };
+
+    const benchmark_install_directory = b.pathJoin(&.{
+        "benchmark/riscv/",
+        "factorial",
+    });
+
+    const riscv_benchmark_library_install = b.addInstallArtifact(riscv_benchmark_library, .{
+        .dest_dir = .{ .override = .{ .custom = benchmark_install_directory } },
+    });
+
+    run_benchmark_step.step.dependOn(&riscv_benchmark_library_install.step);
 }

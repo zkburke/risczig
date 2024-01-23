@@ -1,4 +1,4 @@
-//!Loader implementation for the elf file format
+//!Loader implementation for the ELF64 file format
 
 pub const Loaded = struct {
     image: []u8,
@@ -78,11 +78,22 @@ pub fn load(
 
                 const base_address = program_header.vaddr - minimum_virtual_address;
 
+                const segment_data = image[base_address .. base_address + program_header.memsz];
+                _ = segment_data;
+
                 @memcpy(image[base_address .. base_address + program_header_data.len], program_header_data);
 
                 const rest_size = program_header.memsz - program_header.filesz;
 
                 @memset(image[base_address + program_header_data.len .. base_address + program_header_data.len + rest_size], 0);
+
+                if (program_header.flags.executable) {
+                    std.debug.assert(!program_header.flags.write);
+                }
+
+                if (program_header.flags.executable or (program_header.flags.read and !program_header.flags.write)) {
+                    // try std.os.mprotect(@as([*]align(std.mem.page_size) u8, @alignCast(segment_data.ptr))[0..segment_data.len], std.os.PROT.READ);
+                }
             },
             .dynamic => {
                 //parse dynamic symbols
@@ -267,6 +278,13 @@ pub fn load(
     };
 }
 
+pub fn unload(module: *Loaded, allocator: std.mem.Allocator) void {
+    allocator.free(module.image);
+    allocator.free(module.stack);
+
+    module.* = undefined;
+}
+
 ///Lookup a symbol provided by the host
 fn hostLookup(
     name: [*:0]const u8,
@@ -430,12 +448,12 @@ const Version = enum(u8) {
     _,
 };
 
-pub const OsAbi = enum(u8) {
+const OsAbi = enum(u8) {
     systemv = 0,
     _,
 };
 
-pub const RiscvFlags = packed struct(u32) {
+const RiscvFlags = packed struct(u32) {
     ///Compressed instructions
     riscv_rvc: bool,
     pad0: u1,
@@ -502,7 +520,7 @@ const SHN_UNDEF = 0;
 
 const ProgramHeader = extern struct {
     type: Type align(1),
-    flags: u32 align(1),
+    flags: Flags align(1),
     offset: u64 align(1),
     vaddr: u64 align(1),
     paddr: u64 align(1),
@@ -530,6 +548,13 @@ const ProgramHeader = extern struct {
         loproc = 0x70000000,
         hiproc = 0x7fffffff,
         _,
+    };
+
+    pub const Flags = packed struct(u32) {
+        executable: bool,
+        write: bool,
+        read: bool,
+        _padding: u29,
     };
 };
 

@@ -258,27 +258,24 @@ pub fn execute(
 
                         self.setRegister(r_instruction.rd, @bitCast(result));
                     },
-                    .remu => {
-                        const a: u64 = self.registers[r_instruction.rs1];
-                        const b: u64 = self.registers[r_instruction.rs2];
-
-                        const result = if (b != 0) @rem(a, b) else a;
-
-                        self.setRegister(r_instruction.rd, result);
-                    },
                     .mulh => {
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        const result: i128 = a *% b;
+                        const result: i128 = @as(i128, a) *% @as(i128, b);
 
-                        const upper: i64 = @truncate(result >> @bitSizeOf(u64));
+                        const Result = packed struct(i128) {
+                            lower: u64,
+                            upper: u64,
+                        };
 
-                        self.setRegister(r_instruction.rd, @bitCast(upper));
+                        const result_packed: Result = @bitCast(result);
+
+                        self.setRegister(r_instruction.rd, result_packed.upper);
                     },
                     .mulhu => {
-                        const a: u64 = self.registers[r_instruction.rs1];
-                        const b: u64 = self.registers[r_instruction.rs2];
+                        const a: u128 = self.registers[r_instruction.rs1];
+                        const b: u128 = self.registers[r_instruction.rs2];
 
                         const result: u128 = a *% b;
 
@@ -290,7 +287,7 @@ pub fn execute(
                         const rs1: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const rs2: i65 = @intCast(self.registers[r_instruction.rs2]);
 
-                        const result: i128 = rs1 *% rs2;
+                        const result: i128 = @as(i128, rs1) *% @as(i128, rs2);
 
                         const upper: i64 = @truncate(result >> @bitSizeOf(u64));
 
@@ -300,27 +297,37 @@ pub fn execute(
                         const dividend: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const divisor: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        const result: i64 = if (divisor != 0) @divTrunc(dividend, divisor) else -1;
+                        const result: i64 = if (divisor != 0 and !(dividend == std.math.minInt(i64) and divisor == -1)) @divTrunc(dividend, divisor) else -1;
 
                         const actual_result = if (dividend == std.math.minInt(i64) and divisor == -1) dividend else result;
 
                         self.setRegister(r_instruction.rd, @bitCast(actual_result));
                     },
                     .divu => {
-                        const a: u64 = self.registers[r_instruction.rs1];
-                        const b: u64 = self.registers[r_instruction.rs2];
+                        const dividend: u64 = self.registers[r_instruction.rs1];
+                        const divisor: u64 = self.registers[r_instruction.rs2];
 
-                        const result = if (b != 0) @divTrunc(a, b) else std.math.maxInt(u64);
+                        const result = if (divisor != 0) @divTrunc(dividend, divisor) else std.math.maxInt(u64);
 
                         self.setRegister(r_instruction.rd, result);
                     },
                     .rem => {
-                        const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
-                        const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
+                        const dividend: i64 = @bitCast(self.registers[r_instruction.rs1]);
+                        const divisor: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
-                        const result: i64 = if (b != 0) @rem(a, b) else a;
+                        const result: i64 = if (divisor != 0 and !(dividend == std.math.minInt(i64) and divisor == -1)) @rem(dividend, divisor) else dividend;
 
-                        self.setRegister(r_instruction.rd, @bitCast(result));
+                        const actual_result = if (dividend == std.math.minInt(i64) and divisor == -1) 0 else result;
+
+                        self.setRegister(r_instruction.rd, @bitCast(actual_result));
+                    },
+                    .remu => {
+                        const dividend: u64 = self.registers[r_instruction.rs1];
+                        const divisor: u64 = self.registers[r_instruction.rs2];
+
+                        const result = if (divisor != 0) @rem(dividend, divisor) else dividend;
+
+                        self.setRegister(r_instruction.rd, result);
                     },
                     else => return error.IllegalInstruction,
                 }
@@ -393,21 +400,47 @@ pub fn execute(
                         self.setRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .divw => {
-                        const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
-                        const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
+                        const dividend: i32 = @bitCast(@as(u32, @truncate(self.registers[r_instruction.rs1])));
+                        const divisor: i32 = @bitCast(@as(u32, @truncate(self.registers[r_instruction.rs2])));
 
-                        const result: i32 = if (b != 0) @truncate(@divTrunc(a, b)) else -1;
-                        const sign_extended: i64 = @intCast(result);
+                        const result: i32 = if (divisor != 0 and !(dividend == std.math.minInt(i32) and divisor == -1)) @divTrunc(dividend, divisor) else -1;
+
+                        const actual_result = if (dividend == std.math.minInt(i32) and divisor == -1) dividend else result;
+
+                        const sign_extended: i64 = actual_result;
 
                         self.setRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .divuw => {
-                        const a: u64 = self.registers[r_instruction.rs1];
-                        const b: u64 = self.registers[r_instruction.rs2];
+                        const dividend: u32 = @truncate(self.registers[r_instruction.rs1]);
+                        const divisor: u32 = @truncate(self.registers[r_instruction.rs2]);
 
-                        const result: u32 = if (b != 0) @truncate(@divTrunc(a, b)) else std.math.maxInt(u32);
+                        const result: u32 = if (divisor != 0) @divTrunc(dividend, divisor) else std.math.maxInt(u32);
+                        const sign_extended: i64 = @as(i32, @bitCast(result));
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                    },
+                    .remw => {
+                        const dividend: i32 = @bitCast(@as(u32, @truncate(self.registers[r_instruction.rs1])));
+                        const divisor: i32 = @bitCast(@as(u32, @truncate(self.registers[r_instruction.rs2])));
+
+                        const did_overflow = dividend == std.math.minInt(i32) and divisor == -1;
+
+                        const result: i32 = if (divisor != 0 and !did_overflow) @rem(dividend, divisor) else dividend;
+
+                        const sign_extended: i64 = if (!did_overflow) result else 0;
+
+                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                    },
+                    .remuw => {
+                        const dividend: u32 = @truncate(self.registers[r_instruction.rs1]);
+                        const divisor: u32 = @truncate(self.registers[r_instruction.rs2]);
+
+                        const result: u32 = if (divisor != 0) @rem(dividend, divisor) else dividend;
+
+                        const sign_extended: i64 = @as(i32, @bitCast(result));
+
+                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     else => return error.IllegalInstruction,
                 }
@@ -815,9 +848,6 @@ pub fn execute(
                 program_counter = @ptrFromInt(@as(usize, @bitCast(jump_address)));
             },
             .jalr => {
-                //TODO: implement safe, fast and transparent native call apparatus using flag bits/pointer tagging
-                //eg p = 0b000...111101111000 use last bits to encode flags (is this pointer a native call ect..)
-
                 const j_instruction: InstructionI = @bitCast(instruction);
 
                 const base: i64 = @bitCast(self.registers[j_instruction.rs1]);
@@ -853,7 +883,6 @@ pub fn execute(
 
                     const actual_address: u64 = @bitCast(result);
 
-                    //TODO: when jalring to a special address, yield the interpreter (to be used when the host calls into the vm)
                     if (actual_address == 0) {
                         return;
                     }

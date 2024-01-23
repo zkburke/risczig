@@ -29,7 +29,7 @@ pub export fn _start() void {
     log.err("{s}", .{global});
 
     const nul_addr: *u32 = if (funny_value == 21) undefined else &funny_value;
-    _ = nul_addr;
+    _ = nul_addr; // autofix
 
     const fib_res: i32 = @intCast(fib(10));
 
@@ -72,8 +72,6 @@ fn zero(x: i32) i32 {
 }
 
 fn fib(x: u32) u32 {
-    // std.log.err("@returnAddress() = {x}", .{@returnAddress()});
-
     if (x == 1) return 1;
     if (x == 0) return 0;
 
@@ -119,15 +117,14 @@ pub const std_options = struct {
 
         _ = std.os.write(std.os.STDOUT_FILENO, output) catch return;
 
-        // const stderr = std.io.getStdErr().writer();
-        // stderr.print(level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
+        if (false) {
+            const stderr = std.io.getStdErr().writer();
+            stderr.print(level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
+        }
     }
 };
 
 pub fn panic(msg: []const u8, stacktrace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
-    // std.log.info("panic: {s}", .{msg});
-    // std.log.info("stacktrace = {*}", .{stacktrace});
-
     _ = std.io.getStdErr().write("panic: ") catch 0;
     _ = std.io.getStdErr().write(msg) catch 0;
     _ = std.io.getStdErr().write("\n") catch 0;

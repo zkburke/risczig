@@ -123,15 +123,14 @@ pub fn main() !void {
 
     var imported_symbol_addresses: [2]u64 = undefined;
 
-    const loaded_module = try ElfLoader.load(
+    var loaded_module = try ElfLoader.load(
         allocator,
         elf_data,
         native_procedures,
         &imported_symbol_names,
         &imported_symbol_addresses,
     );
-    defer allocator.free(loaded_module.image);
-    defer allocator.free(loaded_module.stack);
+    defer ElfLoader.unload(&loaded_module, allocator);
 
     std.log.info("imported_symbol_addresses = {x}", .{imported_symbol_addresses});
 
