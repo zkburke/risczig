@@ -10,9 +10,19 @@ extern void printf(const char* format, ...);
 extern void puts(const char* string);
 
 //Native function defined in our host program
-extern void testNativeCall(uint32_t x);
+extern void native_call(uint32_t x);
 
 int funny_value = 21;
+
+void mod_init() {
+    printf("Hello from mod init from c!");
+
+    native_call(0xf32);
+}
+
+void mod_deinit() {
+    printf("Hello from mod deinit from c!");
+}
 
 int lol() {
     zprint("hello from c");
@@ -25,11 +35,15 @@ int lol() {
         res = i;
     }
 
+    native_call(res);
+
     int* ptr = 0;
 
-    *ptr = 10;
+    // *ptr = 10;
 
-    puts("res = %i");
+    printf("res = %i", res);
+    printf("funny_value = %i", funny_value);
+    printf("String Value = {'%s'}", "Hello, cstr!");
 
     return res;
 }

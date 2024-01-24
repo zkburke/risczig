@@ -6,7 +6,7 @@
 pub fn nativeCallWrapper(comptime function: anytype) Hart.NativeCall {
     const function_info = @typeInfo(@TypeOf(function)).Fn;
 
-    std.debug.assert(function_info.calling_convention == .C);
+    validateFunctionPrototype(function);
 
     const Args = std.meta.ArgsTuple(@TypeOf(function));
 
@@ -17,16 +17,27 @@ pub fn nativeCallWrapper(comptime function: anytype) Hart.NativeCall {
             var args: Args = undefined;
 
             inline for (function_info.params, 0..) |param, param_index| {
-                @field(args, std.fmt.comptimePrint("{}", .{param_index})) = loadParameter(
-                    hart,
-                    param.type.?,
-                    param_index,
-                );
+                switch (param.type.?) {
+                    *const Hart, *Hart, Hart => {
+                        @field(args, std.fmt.comptimePrint("{}", .{param_index})) = hart;
+                    },
+                    else => {
+                        @field(args, std.fmt.comptimePrint("{}", .{param_index})) = loadParameter(
+                            hart,
+                            param.type.?,
+                            param_index,
+                        );
+                    },
+                }
             }
 
-            @call(.always_inline, function, args);
+            const return_value = @call(.always_inline, function, args);
 
             //TODO: handle return
+            switch (@TypeOf(return_value)) {
+                void => {},
+                else => {},
+            }
         }
 
         ///Loads parameter from well defined abi location
@@ -36,6 +47,12 @@ pub fn nativeCallWrapper(comptime function: anytype) Hart.NativeCall {
             comptime param_index: comptime_int,
         ) T {
             const location = comptime mapParameterToLocation(param_index);
+
+            switch (T) {
+                *Hart, *const Hart => hart,
+                Hart => hart.*,
+                else => {},
+            }
 
             switch (@typeInfo(T)) {
                 .Pointer => {
@@ -79,6 +96,8 @@ pub fn nativeCallWrapper(comptime function: anytype) Hart.NativeCall {
             inline for (function_info.params[0 .. param_index + 1]) |other_param| {
                 switch (@typeInfo(other_param.type.?)) {
                     .Pointer => {
+                        if (other_param.type == *const Hart or other_param.type == *Hart) continue;
+
                         location = .{ .general_register = next_general_register.? };
 
                         next_general_register = @enumFromInt(@intFromEnum(next_general_register.?) + 1);
@@ -97,6 +116,31 @@ pub fn nativeCallWrapper(comptime function: anytype) Hart.NativeCall {
     };
 
     return S.native;
+}
+
+fn validateFunctionPrototype(comptime function: anytype) void {
+    const function_info = @typeInfo(@TypeOf(function)).Fn;
+
+    if (function_info.calling_convention != .C) {
+        @compileError("Function can only use the C calling convention");
+    }
+
+    var hart_parameter_count = 0;
+
+    inline for (function_info.params, 0..) |param, param_index| {
+        _ = param_index; // autofix
+
+        switch (param.type.?) {
+            *Hart, *const Hart, Hart => {
+                hart_parameter_count += 1;
+            },
+            else => {},
+        }
+    }
+
+    if (hart_parameter_count > 1) {
+        @compileError("Function can only have a single Hart parameter");
+    }
 }
 
 ///Represents the location where a (register sized or less) value can be loaded and stored from

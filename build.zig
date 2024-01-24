@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) !void {
 
     const script_target = b.resolveTargetQuery(.{
         .cpu_arch = .riscv64,
-        .abi = .gnu,
+        .abi = .musl,
         .os_tag = .linux,
         .cpu_features_sub = std.Target.riscv.featureSet(&.{
             .c,

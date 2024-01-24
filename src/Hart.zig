@@ -3,11 +3,16 @@
 ///General purpose registers
 registers: [32]u64,
 program_counter: [*]const u32,
+///A general purpose pointer which is not used directly by the interpreter.
+///It can be used for any custom data that you want to associate with a Hart.
+///This allows for trap handlers, interrupts and native call implementations to use this custom data.
+host_context: ?*anyopaque,
 
 pub fn init() Hart {
     return .{
         .registers = std.mem.zeroes([32]u64),
         .program_counter = undefined,
+        .host_context = null,
     };
 }
 
@@ -67,6 +72,10 @@ pub fn nativeCallPointer(address: u64) *const NativeCall {
 
     return @ptrFromInt(actual_address);
 }
+
+///The special call address which will yield to the execute function
+///This is used for when calling into the vm (and not executing an entrypoint with an at its end exit)
+pub const native_call_address_host_yield: u64 = 0;
 
 pub const ExecuteError = error{
     IllegalInstruction,
@@ -876,6 +885,12 @@ pub fn execute(
 
                     native_procedure(self);
 
+                    const actual_address = self.registers[@intFromEnum(AbiRegister.ra)];
+
+                    if (actual_address == native_call_address_host_yield) {
+                        return;
+                    }
+
                     //return to the return address, as if the native function had done so
                     program_counter = @ptrFromInt(self.registers[@intFromEnum(AbiRegister.ra)]);
                 } else {
@@ -883,7 +898,7 @@ pub fn execute(
 
                     const actual_address: u64 = @bitCast(result);
 
-                    if (actual_address == 0) {
+                    if (actual_address == native_call_address_host_yield) {
                         return;
                     }
 

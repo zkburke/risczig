@@ -4,7 +4,7 @@ extern fn lol() callconv(.C) u32;
 
 const TestNativeCallFn = fn (x: u32) callconv(.C) void;
 
-extern fn testNativeCall(x: u32) callconv(.C) void;
+extern fn native_call(x: u32) callconv(.C) void;
 extern fn puts(string: [*:0]const u8) callconv(.C) void;
 
 extern var funny_value: u32;
@@ -20,7 +20,7 @@ export fn modInit() void {
 export fn modDeinit() void {
     log.info("Hello from modDenit! final funny_value = {}", .{funny_value});
 
-    testNativeCall(funny_value);
+    native_call(funny_value);
 }
 
 pub export fn _start() void {
@@ -39,11 +39,11 @@ pub export fn _start() void {
 
     log.err("double lol: fact_res = {}", .{res});
 
-    testNativeCall(funny_value);
+    native_call(funny_value);
 
     const c_return_val = lol();
 
-    testNativeCall(funny_value);
+    native_call(funny_value);
 
     puts("Hello, world from zig");
 

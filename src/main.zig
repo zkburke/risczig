@@ -106,19 +106,12 @@ pub fn main() !void {
     defer allocator.free(elf_data);
     riscv_script_file.close();
 
-    const native_procedures = std.ComptimeStringMap(
-        *const Hart.NativeCall,
-        .{
-            .{ "testNativeCall", &native_abi.nativeCallWrapper(testNativeCall) },
-            .{ "printf", &native_abi.nativeCallWrapper(nativePrintf) },
-            .{ "puts", &native_abi.nativeCallWrapper(nativePuts) },
-        },
-    );
+    const native_procedures = ImportProceduresFromStruct(natives);
 
     //Procedures we want to import from the script
     const imported_symbol_names = [_][:0]const u8{
-        "modInit",
-        "modDeinit",
+        "mod_init",
+        "mod_deinit",
     };
 
     var imported_symbol_addresses: [2]u64 = undefined;
@@ -172,17 +165,116 @@ pub fn main() !void {
         .{
             .ecall_handler = linux_ecalls.ecall,
             .ebreak_handler = Handlers.ebreak,
+            .debug_instructions = false,
+            .handle_traps = false,
         },
         mod_deinit_address,
     );
 }
+
+fn functionNameStem(path: []const u8) []const u8 {
+    const index = std.mem.lastIndexOfScalar(u8, path, '.') orelse return path[0..];
+    if (index == 0) return path;
+    return path[index..];
+}
+
+fn ImportProceduresFromStruct(comptime namespace: anytype) type {
+    const Entry = struct { []const u8, *const Hart.NativeCall };
+    var kv_list: []const Entry = &.{};
+
+    for (@typeInfo(namespace).Struct.decls) |decl| {
+        const exported_name = functionNameStem(decl.name);
+
+        kv_list = kv_list ++ [_]Entry{
+            .{ exported_name, &native_abi.nativeCallWrapper(@field(namespace, decl.name)) },
+        };
+    }
+
+    return std.ComptimeStringMap(*const Hart.NativeCall, kv_list);
+}
+
+///Native api exposed to scripts
+pub const natives = struct {
+    pub fn puts(string: [*:0]const u8) callconv(.C) void {
+        _ = std.io.getStdErr().write(std.mem.span(string)) catch unreachable;
+        _ = std.io.getStdErr().write("\n") catch unreachable;
+    }
+
+    pub fn printf(hart: *const Hart, format: [*:0]const u8) callconv(.C) void {
+        // _ = std.io.getStdErr().write(std.mem.span(format)) catch unreachable;
+        defer _ = std.io.getStdErr().write("\n") catch unreachable;
+
+        const format_slice = std.mem.span(format);
+
+        var state: enum {
+            start,
+            print_variable,
+        } = .start;
+
+        //eg: printf("hello %s");
+
+        var vararg_start_register: u5 = @intFromEnum(Hart.AbiRegister.a1);
+
+        for (format_slice, 0..) |char, index| {
+            _ = index; // autofix
+
+            switch (state) {
+                .start => {
+                    switch (char) {
+                        '%' => state = .print_variable,
+                        else => {
+                            _ = std.io.getStdErr().write(&[_]u8{char}) catch unreachable;
+                        },
+                    }
+                },
+                .print_variable => {
+                    switch (char) {
+                        'i' => {
+                            const vararg_register_value = hart.registers[vararg_start_register];
+                            vararg_start_register += 1;
+
+                            const value: u32 = @truncate(vararg_register_value);
+
+                            var format_buffer: [256]u8 = undefined;
+
+                            const print_out = std.fmt.bufPrint(&format_buffer, "{}", .{value}) catch unreachable;
+
+                            _ = std.io.getStdErr().write(print_out) catch unreachable;
+                        },
+                        'u' => unreachable,
+                        'd' => unreachable,
+                        's' => {
+                            const vararg_register_value = hart.registers[vararg_start_register];
+                            vararg_start_register += 1;
+
+                            const value: [*:0]const u8 = @ptrFromInt(vararg_register_value);
+
+                            _ = std.io.getStdErr().write(std.mem.span(value)) catch unreachable;
+                        },
+                        'c' => unreachable,
+                        else => {
+                            _ = std.io.getStdErr().write(&[_]u8{char}) catch unreachable;
+
+                            state = .start;
+                        },
+                    }
+                },
+            }
+        }
+    }
+
+    pub fn native_call(x: u32) callconv(.C) void {
+        std.log.info("testNativeCall: x = {}", .{x});
+    }
+};
 
 fn nativePuts(string: [*:0]const u8) callconv(.C) void {
     _ = std.io.getStdErr().write(std.mem.span(string)) catch unreachable;
     _ = std.io.getStdErr().write("\n") catch unreachable;
 }
 
-fn nativePrintf(format: [*:0]const u8) callconv(.C) void {
+fn nativePrintf(hart: *const Hart, format: [*:0]const u8) callconv(.C) void {
+    _ = hart; // autofix
     _ = std.io.getStdErr().write(std.mem.span(format)) catch unreachable;
     _ = std.io.getStdErr().write("\n") catch unreachable;
 }

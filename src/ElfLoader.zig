@@ -32,15 +32,9 @@ pub fn load(
     //TODO: support compressed instructions
     std.debug.assert(!header.flags.riscv_rvc);
 
-    std.log.info("elf_header = {}", .{header.*});
-
     const program_header_start: [*]const ProgramHeader = @ptrCast(elf_data.ptr + header.e_phoff);
 
     const program_headers = program_header_start[0..header.e_phnum];
-
-    for (program_headers) |program_header| {
-        std.log.info("prog header: {}\n", .{program_header});
-    }
 
     //size of the image mapped in memory
     var image_size: usize = 0;
@@ -60,8 +54,6 @@ pub fn load(
     }
 
     std.debug.assert(minimum_virtual_address != std.math.maxInt(usize));
-
-    std.log.info("minimum_virtual_address = {}", .{minimum_virtual_address});
 
     const image = allocator.rawAlloc(image_size, 32, @returnAddress()).?;
     errdefer allocator.free(image[0..image_size]);
@@ -96,8 +88,6 @@ pub fn load(
                 }
             },
             .dynamic => {
-                //parse dynamic symbols
-
                 const dynamic_section = elf_data[program_header.offset .. program_header.offset + program_header.filesz];
 
                 const values_ptr: [*]const Dyn = @alignCast(@ptrCast(dynamic_section));
@@ -112,8 +102,6 @@ pub fn load(
                 var rel_size: ?usize = null;
 
                 for (values) |value| {
-                    std.log.info("value: tag = {}, val = 0x{x}", .{ value.tag, value.val });
-
                     switch (value.tag) {
                         .pltgot => {},
                         .pltrelsz => {
@@ -123,8 +111,6 @@ pub fn load(
                             rel_size = value.val;
                         },
                         .symtab => {
-                            std.log.info("symtab = 0x{x}", .{value.val});
-
                             const offset = value.val;
 
                             symbol_table = @ptrCast(@alignCast(elf_data.ptr + offset));
@@ -143,14 +129,10 @@ pub fn load(
                     }
                 }
 
-                std.log.info("first symbol: {}", .{symbol_table.?[1]});
-
                 for (values) |value| {
                     switch (value.tag) {
                         .pltgot => {},
                         .rela => {
-                            std.log.info("rela = 0x{x}", .{value.val});
-
                             const offset = value.val;
 
                             const relocation_bytes = elf_data[offset .. offset + relocation_table_size];
@@ -159,8 +141,6 @@ pub fn load(
                             const relocations = relocation_ptr[0 .. relocation_bytes.len / @sizeOf(RelA)];
 
                             for (relocations) |relocation| {
-                                std.log.info("{}", .{relocation});
-
                                 const address_ptr: *u64 = @alignCast(@ptrCast(image + relocation.offset));
 
                                 const symbol: ?Sym = if (relocation.info.sym != 0) symbol_table.?[relocation.info.sym] else null;
@@ -198,11 +178,7 @@ pub fn load(
 
                                 std.debug.assert(relocation.info.type == .riscv_jump_slot);
 
-                                std.log.info("offset: 0x{}, info: 0x{}, addend: {}", .{ relocation.offset, relocation.info, relocation.addend });
-
                                 const symbol = symbol_table.?[relocation.info.sym];
-
-                                std.log.info("relocation symbol: value = 0x{x}", .{symbol.value});
 
                                 const address_ptr: *u64 = @alignCast(@ptrCast(image + relocation_offset));
 
@@ -216,7 +192,7 @@ pub fn load(
 
                                     if (@TypeOf(native_procedures) != @TypeOf(null)) {
                                         const native_procedure = native_procedures.get(string) orelse {
-                                            std.log.info("Failed to find symbol '{s}'", .{string});
+                                            log.err("Failed to find symbol '{s}'", .{string});
 
                                             return error.SymbolFailure;
                                         };
@@ -247,9 +223,17 @@ pub fn load(
                     );
 
                     if (maybe_symbol) |symbol| {
-                        import_procedure_addresses[import_index] = @intFromPtr(image + symbol.value);
+                        switch (symbol.visibility()) {
+                            .default => {
+                                import_procedure_addresses[import_index] = @intFromPtr(image + symbol.value);
+                            },
+                            .hidden => {},
+                            .internal => {},
+                            .protected => {},
+                            _ => unreachable,
+                        }
                     } else {
-                        std.log.info("loader: unable to resolve symbol '{s}' from elf object", .{import_name});
+                        log.err("unable to resolve symbol '{s}' from elf object", .{import_name});
 
                         return error.SymbolResolutionFailed;
                     }
@@ -263,13 +247,13 @@ pub fn load(
         }
     }
 
-    std.log.info("image base = {*}, image size = {}", .{ image, image_size });
+    log.info("image base = {*}, image size = {}", .{ image, image_size });
 
     //TODO: stack should be local/unique to each hart, not to loaded modules
     const stack = allocator.rawAlloc(stack_size, 16, @returnAddress()).?;
     errdefer allocator.free(stack[0..stack_size]);
 
-    std.log.info("stack base = {*}, stack size = {}", .{ stack, stack_size });
+    log.info("stack base = {*}, stack size = {}", .{ stack, stack_size });
 
     return Loaded{
         .image = image[0..image_size],
@@ -285,7 +269,6 @@ pub fn unload(module: *Loaded, allocator: std.mem.Allocator) void {
     module.* = undefined;
 }
 
-///Lookup a symbol provided by the host
 fn hostLookup(
     name: [*:0]const u8,
 ) void {
@@ -294,7 +277,6 @@ fn hostLookup(
     @compileError("Unimplemented");
 }
 
-///Lookup a symbol provided by the elf file
 fn guestLookup(
     string_table: [*:0]const u8,
     symbol_table: [*]const Sym,
@@ -326,10 +308,11 @@ fn gnuLookup(
     hash_table: [*]const u32,
     name: [*:0]const u8,
 ) ?*const Sym {
-    const name_hash = gnuHash(name);
-
-    //TODO: is this right?
     const bloom_el_t = u64;
+
+    const elf_class_bits: u64 = @bitSizeOf(u64);
+
+    const name_hash = gnuHash(name);
 
     const nbuckets = hash_table[0];
     const symoffset = hash_table[1];
@@ -339,17 +322,15 @@ fn gnuLookup(
     const buckets: [*]const u32 = @ptrCast(&bloom[bloom_size]);
     const chain: [*]const u32 = buckets + nbuckets;
 
-    const elf_class_bits = @bitSizeOf(u64);
-
     comptime std.debug.assert(elf_class_bits == 64);
 
     const word = bloom[(name_hash / elf_class_bits) % bloom_size];
 
-    const mask: u64 = 0 | (@as(bloom_el_t, 1) << @as(u5, @truncate(name_hash % elf_class_bits))) | (@as(bloom_el_t, 1) << @as(u5, @truncate((name_hash >> @as(u5, @truncate(bloom_shift))) % elf_class_bits)));
+    const mask: u64 = @as(bloom_el_t, 1) << @as(u5, @truncate(name_hash % elf_class_bits)) | @as(bloom_el_t, 1) << @as(u5, @truncate((name_hash >> @as(u5, @truncate(bloom_shift))) % elf_class_bits));
 
     if (word & mask != mask) {
         //TODO: Look into this; I don't think this is right, as when I uncomment this, no symbols are resolved
-        //return null;
+        // return null;
     }
 
     var symbol_index = buckets[name_hash % nbuckets];
@@ -374,15 +355,12 @@ fn gnuLookup(
     return null;
 }
 
+///TODO: Lookup a symbol provided by the elf file using DT_GNU_HASH
 fn hashLookup() void {
     @compileError("Unimplemented");
 }
 
 fn strEql(a: [*:0]const u8, b: [*:0]const u8) bool {
-    if (true) {
-        return std.mem.eql(u8, std.mem.span(a), std.mem.span(b));
-    }
-
     var index: usize = 0;
 
     while (a[index] == b[index]) {
@@ -671,4 +649,5 @@ const SectionHeader = extern struct {
 };
 
 const std = @import("std");
+const log = std.log.scoped(.elf_loader);
 const Hart = @import("Hart.zig");
