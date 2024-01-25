@@ -1,92 +1,8 @@
-const std = @import("std");
-const Hart = @import("Hart.zig");
-const ElfLoader = @import("ElfLoader.zig");
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa.deinit() != .leak);
 
     const allocator = gpa.allocator();
-
-    const code = [_]u32{
-        0x00112623,
-        0x00812423,
-        //lui x10, 306
-        0x00132537,
-        //addi a1, a0, 1
-        0x00150593,
-        //addi a1, a1, -2
-        0xffe58593,
-        //sub a0, a1, a2
-        0x40c58533,
-        //add a0, a1, a2
-        0x00c58533,
-        //and a0, a1, a2
-        0x00c5f533,
-        //or a0, a1, a2
-        0x00c5e533,
-        //andi a0, a0, 0x10
-        0x01057513,
-        //beq a0, a1, 50
-        0x02b50963,
-        //auipc ra, 0x00
-        0x00000097,
-        0x00000037,
-    };
-    _ = code; // autofix
-
-    const loop_code = [_]u32{
-        //addi x10, x0, 10 (mov x10, 10)
-        0x00a00513,
-        //ebreak
-        0x00100073,
-        //addi x10, x10, -1
-        0xfff50513,
-        //bne x10, x0, -2
-        0xfe051fe3,
-
-        //addi a2, x0, 0b1111110100
-
-        //addi a7, x0, 2
-        0x00200893,
-        //addi a0, x0, 32
-        0x02000513,
-        //ecall
-        0x00000073,
-        0x3f400613,
-        //ebreak
-        0x00100073,
-        //addi a5, x0, 69
-        0x04500793,
-        //sw a5, 0(a6)
-        0x00f82023,
-        //lw a5, 0(a6)
-        0x00082783,
-        //ebreak
-        0x00100073,
-        //mv a7, 1
-        0x00100893,
-        //mv a0, 37
-        0x02500513,
-        //ecall
-        0x00000073,
-        //mv a7, 0 (ecall: exit)
-        0x000008b3,
-        //ecall
-        0x00000073,
-    };
-    _ = loop_code; // autofix
-
-    const assembled_code = [_]u32{
-        //mv      a1,s0,
-        0x00040593,
-        0x00112623,
-        0x01010413,
-        0x00558513,
-        0x00558513,
-        0x00012537,
-    };
-    _ = assembled_code; // autofix
 
     const Handlers = struct {
         pub fn ebreak(vm: *Hart) Hart.InterruptResult {
@@ -112,9 +28,16 @@ pub fn main() !void {
     const imported_symbol_names = [_][:0]const u8{
         "mod_init",
         "mod_deinit",
+        "modInit",
     };
 
-    var imported_symbol_addresses: [2]u64 = undefined;
+    var imported_symbol_addresses: [3]u64 = undefined;
+
+    const Imports = struct {
+        zig_mod_init: riscz.ProcedureAddress(fn () callconv(.C) void),
+        c_mod_init: ?riscz.ProcedureAddress(fn () callconv(.C) void) = null,
+    };
+    _ = Imports; // autofix
 
     var loaded_module = try ElfLoader.load(
         allocator,
@@ -133,7 +56,6 @@ pub fn main() !void {
     //The entry point specified in the elf header
     const entry_point: [*]const u32 = @alignCast(@ptrCast(&loaded_module.image[loaded_module.entry_point]));
 
-    const mod_init_address: [*]const u32 = @ptrFromInt(imported_symbol_addresses[0]);
     const mod_deinit_address: [*]const u32 = @ptrFromInt(imported_symbol_addresses[1]);
 
     vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
@@ -147,16 +69,41 @@ pub fn main() !void {
         entry_point,
     );
 
+    const execute_config = Hart.ExecuteConfig{
+        .ecall_handler = linux_ecalls.ecall,
+        .ebreak_handler = Handlers.ebreak,
+        .debug_instructions = false,
+        .handle_traps = false,
+    };
+
+    const ModInitResult = enum(u8) {
+        succeed = 0,
+        fail = 1,
+        _,
+    };
+
+    const zig_mod_init_address: riscz.ProcedureAddress(fn () callconv(.C) ModInitResult) = .{ .address = imported_symbol_addresses[2] };
+    const mod_init_address: riscz.ProcedureAddress(fn (ctx_value: u32) callconv(.C) u32) = .{ .address = imported_symbol_addresses[0] };
+
     vm.resetRegisters();
     vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
 
-    try vm.execute(
-        .{
-            .ecall_handler = linux_ecalls.ecall,
-            .ebreak_handler = Handlers.ebreak,
+    switch (try riscz.callProcedure(&vm, execute_config, zig_mod_init_address, .{})) {
+        .succeed => {
+            std.log.info("modInit succeeded", .{});
         },
-        mod_init_address,
-    );
+        .fail => {
+            std.log.info("modInit failed", .{});
+        },
+        _ => unreachable,
+    }
+
+    vm.resetRegisters();
+    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+
+    const mod_init_res = try riscz.callProcedure(&vm, execute_config, mod_init_address, .{98});
+
+    std.log.info("mod_init_res = {}", .{mod_init_res});
 
     vm.resetRegisters();
     vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
@@ -186,7 +133,7 @@ fn ImportProceduresFromStruct(comptime namespace: anytype) type {
         const exported_name = functionNameStem(decl.name);
 
         kv_list = kv_list ++ [_]Entry{
-            .{ exported_name, &native_abi.nativeCallWrapper(@field(namespace, decl.name)) },
+            .{ exported_name, &abi.nativeCallWrapper(@field(namespace, decl.name)) },
         };
     }
 
@@ -201,7 +148,6 @@ pub const natives = struct {
     }
 
     pub fn printf(hart: *const Hart, format: [*:0]const u8) callconv(.C) void {
-        // _ = std.io.getStdErr().write(std.mem.span(format)) catch unreachable;
         defer _ = std.io.getStdErr().write("\n") catch unreachable;
 
         const format_slice = std.mem.span(format);
@@ -210,8 +156,6 @@ pub const natives = struct {
             start,
             print_variable,
         } = .start;
-
-        //eg: printf("hello %s");
 
         var vararg_start_register: u5 = @intFromEnum(Hart.AbiRegister.a1);
 
@@ -268,20 +212,9 @@ pub const natives = struct {
     }
 };
 
-fn nativePuts(string: [*:0]const u8) callconv(.C) void {
-    _ = std.io.getStdErr().write(std.mem.span(string)) catch unreachable;
-    _ = std.io.getStdErr().write("\n") catch unreachable;
-}
-
-fn nativePrintf(hart: *const Hart, format: [*:0]const u8) callconv(.C) void {
-    _ = hart; // autofix
-    _ = std.io.getStdErr().write(std.mem.span(format)) catch unreachable;
-    _ = std.io.getStdErr().write("\n") catch unreachable;
-}
-
-fn testNativeCall(x: u32) callconv(.C) void {
-    std.log.info("testNativeCall: x = {}", .{x});
-}
-
-const native_abi = @import("native_abi.zig");
+const std = @import("std");
+const riscz = @import("riscz");
 const linux_ecalls = @import("linux_ecalls.zig");
+const Hart = riscz.Hart;
+const ElfLoader = riscz.ElfLoader;
+const abi = riscz.abi;

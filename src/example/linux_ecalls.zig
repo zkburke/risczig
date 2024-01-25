@@ -107,4 +107,5 @@ pub const ECallCode = enum(u16) {
 };
 
 const std = @import("std");
-const Hart = @import("Hart.zig");
+const riscz = @import("riscz");
+const Hart = riscz.Hart;

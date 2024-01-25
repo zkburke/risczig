@@ -68,11 +68,13 @@ pub fn build(b: *std.Build) !void {
     }
 
     const exe = b.addExecutable(.{
-        .name = "riscz",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .name = "riscz_example",
+        .root_source_file = .{ .path = "src/example/main.zig" },
         .target = target,
         .optimize = optimize,
     });
+
+    exe.root_module.addImport("riscz", risczig_module);
 
     b.installArtifact(exe);
 

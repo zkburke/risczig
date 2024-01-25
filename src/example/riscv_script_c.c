@@ -14,10 +14,12 @@ extern void native_call(uint32_t x);
 
 int funny_value = 21;
 
-void mod_init() {
-    printf("Hello from mod init from c!");
+uint32_t mod_init(uint32_t ctx_value) {
+    printf("Hello from mod init from c! ctx_value = %i", ctx_value);
 
     native_call(0xf32);
+
+    return 0x3;
 }
 
 void mod_deinit() {

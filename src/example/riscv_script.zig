@@ -11,10 +11,21 @@ extern var funny_value: u32;
 
 const log = std.log.scoped(.riscv_script);
 
-export fn modInit() void {
+const ModInitResult = enum(u8) {
+    succeed = 0,
+    fail = 1,
+};
+
+export fn modInit() ModInitResult {
     log.info("Hello from modInit! initial funny_value = {}", .{funny_value});
 
     funny_value += 13;
+
+    if (funny_value < 30) {
+        return .fail;
+    }
+
+    return .succeed;
 }
 
 export fn modDeinit() void {
