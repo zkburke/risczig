@@ -1,5 +1,3 @@
-const std = @import("std");
-
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -36,36 +34,11 @@ pub fn build(b: *std.Build) !void {
 
     b.getInstallStep().dependOn(&install_file.step);
 
-    //link some c in as well
     riscv_script.addCSourceFile(.{
         .file = .{ .path = "src/example/riscv_script_c.c" },
     });
 
-    //Question to self: is this required?
-    // riscv_script.pie = true;
-
     b.installArtifact(riscv_script);
-
-    if (false) {
-        const riscv_script_c = b.addExecutable(.{
-            .name = "riscv_script_c",
-            .root_source_file = null,
-            .target = script_target,
-            .optimize = .Debug,
-            .use_llvm = true,
-            .single_threaded = true,
-            .pic = true,
-            .strip = false,
-            .linkage = .static,
-        });
-        riscv_script_c.pie = true;
-
-        riscv_script_c.addCSourceFile(.{
-            .file = .{ .path = "src/example/riscv_script_c.c" },
-        });
-
-        b.installArtifact(riscv_script_c);
-    }
 
     const exe = b.addExecutable(.{
         .name = "riscz_example",
@@ -105,18 +78,9 @@ pub fn build(b: *std.Build) !void {
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
-    const exe_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
-
     const test_step = b.step("test", "Run unit tests");
 
     test_step.dependOn(&run_lib_unit_tests.step);
-    test_step.dependOn(&run_exe_unit_tests.step);
 
     const include_riscv_tests = b.option(bool, "include_riscv_tests", "Compile the risc-v-tests test suite") orelse false;
 
@@ -271,3 +235,5 @@ pub fn build(b: *std.Build) !void {
 
     run_benchmark_step.step.dependOn(&riscv_benchmark_library_install.step);
 }
+
+const std = @import("std");
