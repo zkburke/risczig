@@ -1377,6 +1377,7 @@ pub const Register = enum(u5) {
     x31,
 };
 
+///TODO: add this to abi.zig?
 pub const AbiRegister = enum(u5) {
     zero,
     ra,
@@ -1448,6 +1449,7 @@ pub const FloatRegister = enum(u5) {
     f31,
 };
 
+///TODO: add this to abi.zig?
 pub const FloatAbiRegister = enum(u5) {
     ft0,
     ft1,

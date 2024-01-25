@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) !void {
 
     const riscv_script = b.addSharedLibrary(.{
         .name = "riscv_script",
-        .root_source_file = .{ .path = "src/example/riscv_script.zig" },
+        .root_source_file = .{ .path = "example/riscv_script.zig" },
         .target = script_target,
         .optimize = .Debug,
         .use_llvm = true,
@@ -35,14 +35,14 @@ pub fn build(b: *std.Build) !void {
     b.getInstallStep().dependOn(&install_file.step);
 
     riscv_script.addCSourceFile(.{
-        .file = .{ .path = "src/example/riscv_script_c.c" },
+        .file = .{ .path = "example/riscv_script_c.c" },
     });
 
     b.installArtifact(riscv_script);
 
     const exe = b.addExecutable(.{
         .name = "riscz_example",
-        .root_source_file = .{ .path = "src/example/main.zig" },
+        .root_source_file = .{ .path = "example/main.zig" },
         .target = target,
         .optimize = optimize,
     });

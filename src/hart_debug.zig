@@ -439,5 +439,5 @@ const BInstructionMask = Hart.BInstructionMask;
 const SInstructionMask = Hart.SInstructionMask;
 
 const Hart = @import("Hart.zig");
-const log = std.log.scoped(.hart_debug);
 const std = @import("std");
+const log = std.log.scoped(.hart_debug);
