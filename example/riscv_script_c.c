@@ -14,6 +14,9 @@ extern void native_call(uint32_t x);
 
 int funny_value = 21;
 
+extern void qu_begin_raster_pass();
+extern void qu_end_raster_pass();
+
 uint32_t mod_init(uint32_t ctx_value) {
     printf("Hello from mod init from c! ctx_value = %i", ctx_value);
 
@@ -24,6 +27,7 @@ uint32_t mod_init(uint32_t ctx_value) {
 
 void mod_deinit() {
     printf("Hello from mod deinit from c!");
+    printf("C is looking nice today!");
 }
 
 int lol() {

@@ -1,7 +1,8 @@
-//!Virtual Machine Hart implementation for RV64I-MAFD, along with zfencei and zicsr
+//!Virtual Machine Hart (Hardware Thread) implementation for RV64I-MAFD
 //!Contains all Hart internal state
 ///General purpose registers
 registers: [32]u64,
+float_registers: [32]u64,
 program_counter: [*]const u32,
 ///A general purpose pointer which is not used directly by the interpreter.
 ///It can be used for any custom data that you want to associate with a Hart.
@@ -11,6 +12,7 @@ host_context: ?*anyopaque,
 pub fn init() Hart {
     return .{
         .registers = std.mem.zeroes([32]u64),
+        .float_registers = std.mem.zeroes([32]u64),
         .program_counter = undefined,
         .host_context = null,
     };
@@ -22,6 +24,7 @@ pub fn deinit(self: *Hart) void {
 
 pub fn resetRegisters(self: *Hart) void {
     self.registers = std.mem.zeroes([32]u64);
+    self.float_registers = std.mem.zeroes([32]u64);
     self.program_counter = undefined;
 }
 
@@ -31,9 +34,31 @@ pub inline fn readRegister(self: *Hart, register: u5) u64 {
     return self.registers[register];
 }
 
-pub inline fn setRegister(self: *Hart, register: u5, value: u64) void {
+pub inline fn writeRegister(self: *Hart, register: u5, value: u64) void {
     if (register != 0) {
         self.registers[register] = value;
+    }
+}
+
+pub inline fn readFloatRegister(self: *const Hart, register: u5, comptime T: type) T {
+    switch (T) {
+        f32 => {
+            const f_32: u32 = @truncate(self.float_registers[register]);
+
+            return @bitCast(f_32);
+        },
+        else => @compileError(""),
+    }
+}
+
+pub inline fn writeFloatRegister(self: *Hart, register: u5, comptime T: type, value: T) void {
+    switch (T) {
+        f32 => {
+            const reg_32: u32 = @bitCast(value);
+
+            self.float_registers[register] = reg_32;
+        },
+        else => @compileError(""),
     }
 }
 
@@ -84,6 +109,11 @@ pub const ExecuteError = error{
 
 ///Compile time configuration for how an execute function should work
 pub const ExecuteConfig = struct {
+    enable_m_extension: bool = true,
+    enable_a_extension: bool = true,
+    enable_f_extension: bool = true,
+    enable_zifencei_extension: bool = true,
+
     ecall_handler: ?fn (vm: *Hart) InterruptResult = null,
     ebreak_handler: ?fn (vm: *Hart) InterruptResult = null,
     ///Trace each instruction by logging them
@@ -149,7 +179,7 @@ pub fn execute(
 
                 const sign_extended: i64 = @as(i32, @bitCast(value));
 
-                self.setRegister(u_instruction.rd, @bitCast(sign_extended));
+                self.writeRegister(u_instruction.rd, @bitCast(sign_extended));
 
                 program_counter += 1;
             },
@@ -170,7 +200,7 @@ pub fn execute(
 
                 const actual_address: i64 = base + sign_extended_offset;
 
-                self.setRegister(u_instruction.rd, @bitCast(actual_address));
+                self.writeRegister(u_instruction.rd, @bitCast(actual_address));
 
                 program_counter += 1;
             },
@@ -185,7 +215,7 @@ pub fn execute(
 
                         const result = a +% b;
 
-                        self.setRegister(r_instruction.rd, @bitCast(result));
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
                     },
                     .sub => {
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
@@ -193,7 +223,7 @@ pub fn execute(
 
                         const result = a -% b;
 
-                        self.setRegister(r_instruction.rd, @bitCast(result));
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
                     },
                     .@"and" => {
                         const a: u64 = self.registers[r_instruction.rs1];
@@ -201,7 +231,7 @@ pub fn execute(
 
                         const result = a & b;
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.writeRegister(r_instruction.rd, result);
                     },
                     .@"or" => {
                         const a: u64 = self.registers[r_instruction.rs1];
@@ -209,7 +239,7 @@ pub fn execute(
 
                         const result = a | b;
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.writeRegister(r_instruction.rd, result);
                     },
                     .xor => {
                         const a: u64 = self.registers[r_instruction.rs1];
@@ -217,7 +247,7 @@ pub fn execute(
 
                         const result = a ^ b;
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.writeRegister(r_instruction.rd, result);
                     },
                     .sll => {
                         const a: u64 = self.registers[r_instruction.rs1];
@@ -225,7 +255,7 @@ pub fn execute(
 
                         const result: u64 = a << b;
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.writeRegister(r_instruction.rd, result);
                     },
                     .srl => {
                         const a: u64 = self.registers[r_instruction.rs1];
@@ -233,7 +263,7 @@ pub fn execute(
 
                         const result: u64 = a >> b;
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.writeRegister(r_instruction.rd, result);
                     },
                     .sra => {
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
@@ -241,7 +271,7 @@ pub fn execute(
 
                         const result: i64 = a >> b;
 
-                        self.setRegister(r_instruction.rd, @bitCast(result));
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
                     },
                     .slt => {
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
@@ -249,7 +279,7 @@ pub fn execute(
 
                         const result: u64 = @intFromBool(a < b);
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.writeRegister(r_instruction.rd, result);
                     },
                     .sltu => {
                         const a: u64 = @bitCast(self.registers[r_instruction.rs1]);
@@ -257,17 +287,21 @@ pub fn execute(
 
                         const result: u64 = @intFromBool(a < b);
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.writeRegister(r_instruction.rd, result);
                     },
                     .mul => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
                         const result = a *% b;
 
-                        self.setRegister(r_instruction.rd, @bitCast(result));
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
                     },
                     .mulh => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
@@ -280,9 +314,11 @@ pub fn execute(
 
                         const result_packed: Result = @bitCast(result);
 
-                        self.setRegister(r_instruction.rd, result_packed.upper);
+                        self.writeRegister(r_instruction.rd, result_packed.upper);
                     },
                     .mulhu => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const a: u128 = self.registers[r_instruction.rs1];
                         const b: u128 = self.registers[r_instruction.rs2];
 
@@ -290,9 +326,11 @@ pub fn execute(
 
                         const upper: u64 = @truncate(result >> @bitSizeOf(u64));
 
-                        self.setRegister(r_instruction.rd, upper);
+                        self.writeRegister(r_instruction.rd, upper);
                     },
                     .mulhsu => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const rs1: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const rs2: i65 = @intCast(self.registers[r_instruction.rs2]);
 
@@ -300,9 +338,11 @@ pub fn execute(
 
                         const upper: i64 = @truncate(result >> @bitSizeOf(u64));
 
-                        self.setRegister(r_instruction.rd, @bitCast(upper));
+                        self.writeRegister(r_instruction.rd, @bitCast(upper));
                     },
                     .div => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const dividend: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const divisor: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
@@ -310,17 +350,21 @@ pub fn execute(
 
                         const actual_result = if (dividend == std.math.minInt(i64) and divisor == -1) dividend else result;
 
-                        self.setRegister(r_instruction.rd, @bitCast(actual_result));
+                        self.writeRegister(r_instruction.rd, @bitCast(actual_result));
                     },
                     .divu => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const dividend: u64 = self.registers[r_instruction.rs1];
                         const divisor: u64 = self.registers[r_instruction.rs2];
 
                         const result = if (divisor != 0) @divTrunc(dividend, divisor) else std.math.maxInt(u64);
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.writeRegister(r_instruction.rd, result);
                     },
                     .rem => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const dividend: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const divisor: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
@@ -328,15 +372,17 @@ pub fn execute(
 
                         const actual_result = if (dividend == std.math.minInt(i64) and divisor == -1) 0 else result;
 
-                        self.setRegister(r_instruction.rd, @bitCast(actual_result));
+                        self.writeRegister(r_instruction.rd, @bitCast(actual_result));
                     },
                     .remu => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const dividend: u64 = self.registers[r_instruction.rs1];
                         const divisor: u64 = self.registers[r_instruction.rs2];
 
                         const result = if (divisor != 0) @rem(dividend, divisor) else dividend;
 
-                        self.setRegister(r_instruction.rd, result);
+                        self.writeRegister(r_instruction.rd, result);
                     },
                     else => return error.IllegalInstruction,
                 }
@@ -356,7 +402,7 @@ pub fn execute(
 
                         const sign_extended: i64 = @intCast(result);
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .subw => {
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
@@ -366,7 +412,7 @@ pub fn execute(
 
                         const sign_extended: i64 = @intCast(result);
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .sllw => {
                         const signed_rs1: i64 = @bitCast(self.registers[r_instruction.rs1]);
@@ -376,7 +422,7 @@ pub fn execute(
                         const result: i32 = a << b;
                         const sign_extended: i64 = result;
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .srlw => {
                         const a: u32 = @truncate(self.registers[r_instruction.rs1]);
@@ -387,7 +433,7 @@ pub fn execute(
                         const signed: i32 = @bitCast(result);
                         const sign_extension: i64 = signed;
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extension));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extension));
                     },
                     .sraw => {
                         const a: i32 = @truncate(@as(i64, @bitCast(self.registers[r_instruction.rs1])));
@@ -397,18 +443,22 @@ pub fn execute(
 
                         const sign_extended: i64 = result;
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .mulw => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const a: i64 = @bitCast(self.registers[r_instruction.rs1]);
                         const b: i64 = @bitCast(self.registers[r_instruction.rs2]);
 
                         const result: i32 = @truncate(a *% b);
                         const sign_extended: i64 = @intCast(result);
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .divw => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const dividend: i32 = @bitCast(@as(u32, @truncate(self.registers[r_instruction.rs1])));
                         const divisor: i32 = @bitCast(@as(u32, @truncate(self.registers[r_instruction.rs2])));
 
@@ -418,18 +468,22 @@ pub fn execute(
 
                         const sign_extended: i64 = actual_result;
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .divuw => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const dividend: u32 = @truncate(self.registers[r_instruction.rs1]);
                         const divisor: u32 = @truncate(self.registers[r_instruction.rs2]);
 
                         const result: u32 = if (divisor != 0) @divTrunc(dividend, divisor) else std.math.maxInt(u32);
                         const sign_extended: i64 = @as(i32, @bitCast(result));
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .remw => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const dividend: i32 = @bitCast(@as(u32, @truncate(self.registers[r_instruction.rs1])));
                         const divisor: i32 = @bitCast(@as(u32, @truncate(self.registers[r_instruction.rs2])));
 
@@ -439,9 +493,11 @@ pub fn execute(
 
                         const sign_extended: i64 = if (!did_overflow) result else 0;
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     .remuw => {
+                        if (!config.enable_m_extension) return error.IllegalInstruction;
+
                         const dividend: u32 = @truncate(self.registers[r_instruction.rs1]);
                         const divisor: u32 = @truncate(self.registers[r_instruction.rs2]);
 
@@ -449,7 +505,7 @@ pub fn execute(
 
                         const sign_extended: i64 = @as(i32, @bitCast(result));
 
-                        self.setRegister(r_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
                     },
                     else => return error.IllegalInstruction,
                 }
@@ -467,7 +523,7 @@ pub fn execute(
 
                         const result = rs1 +% immediate;
 
-                        self.setRegister(i_instruction.rd, @bitCast(result));
+                        self.writeRegister(i_instruction.rd, @bitCast(result));
                     },
                     .slti => {
                         const rs1: i64 = @bitCast(self.registers[i_instruction.rs1]);
@@ -475,7 +531,7 @@ pub fn execute(
 
                         const result: u64 = @intFromBool(rs1 < immediate);
 
-                        self.setRegister(i_instruction.rd, result);
+                        self.writeRegister(i_instruction.rd, result);
                     },
                     .sltiu => {
                         const a: u64 = self.registers[i_instruction.rs1];
@@ -484,28 +540,28 @@ pub fn execute(
 
                         const result: u64 = @intFromBool(a < b);
 
-                        self.setRegister(i_instruction.rd, result);
+                        self.writeRegister(i_instruction.rd, result);
                     },
                     .xori => {
                         const immediate: i64 = @intCast(@as(i12, @bitCast(i_instruction.imm)));
 
                         const result = @as(i64, @bitCast(self.registers[i_instruction.rs1])) ^ immediate;
 
-                        self.setRegister(i_instruction.rd, @bitCast(result));
+                        self.writeRegister(i_instruction.rd, @bitCast(result));
                     },
                     .ori => {
                         const immediate: i64 = @intCast(@as(i12, @bitCast(i_instruction.imm)));
 
                         const result = @as(i64, @bitCast(self.registers[i_instruction.rs1])) | immediate;
 
-                        self.setRegister(i_instruction.rd, @bitCast(result));
+                        self.writeRegister(i_instruction.rd, @bitCast(result));
                     },
                     .andi => {
                         const immediate: i64 = @intCast(@as(i12, @bitCast(i_instruction.imm)));
 
                         const result = @as(i64, @bitCast(self.registers[i_instruction.rs1])) & immediate;
 
-                        self.setRegister(i_instruction.rd, @bitCast(result));
+                        self.writeRegister(i_instruction.rd, @bitCast(result));
                     },
                     .slli => {
                         const Immediate = packed struct(u12) {
@@ -515,7 +571,7 @@ pub fn execute(
 
                         const imm: Immediate = @bitCast(i_instruction.imm);
 
-                        self.setRegister(i_instruction.rd, self.registers[i_instruction.rs1] << imm.shamt);
+                        self.writeRegister(i_instruction.rd, self.registers[i_instruction.rs1] << imm.shamt);
                     },
                     .srli_and_srai => {
                         const Immediate = packed struct(u12) {
@@ -527,7 +583,7 @@ pub fn execute(
 
                         switch (imm.funct6) {
                             0b000000 => {
-                                self.setRegister(i_instruction.rd, self.registers[i_instruction.rs1] >> imm.shamt);
+                                self.writeRegister(i_instruction.rd, self.registers[i_instruction.rs1] >> imm.shamt);
                             },
                             0b010000 => {
                                 const rs1: i64 = @bitCast(self.registers[i_instruction.rs1]);
@@ -535,7 +591,7 @@ pub fn execute(
 
                                 const result = rs1 >> shamt;
 
-                                self.setRegister(i_instruction.rd, @bitCast(result));
+                                self.writeRegister(i_instruction.rd, @bitCast(result));
                             },
                             else => unreachable,
                         }
@@ -560,7 +616,7 @@ pub fn execute(
 
                         const sign_extended: i64 = truncated;
 
-                        self.setRegister(i_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(i_instruction.rd, @bitCast(sign_extended));
                     },
                     .slliw => {
                         const Immediate = packed struct(u12) {
@@ -578,7 +634,7 @@ pub fn execute(
                         const result: i32 = @truncate(rs1_32 << shift_ammount);
                         const sign_extended: i64 = result;
 
-                        self.setRegister(i_instruction.rd, @bitCast(sign_extended));
+                        self.writeRegister(i_instruction.rd, @bitCast(sign_extended));
                     },
                     .srliw_and_sraiw => {
                         const Immediate = packed struct(u12) {
@@ -602,7 +658,7 @@ pub fn execute(
 
                                 const sign_extended: i64 = signed;
 
-                                self.setRegister(i_instruction.rd, @bitCast(sign_extended));
+                                self.writeRegister(i_instruction.rd, @bitCast(sign_extended));
                             },
                             //Right arithmetic
                             0b010000 => {
@@ -612,7 +668,7 @@ pub fn execute(
 
                                 const sign_extended: i64 = result;
 
-                                self.setRegister(i_instruction.rd, @bitCast(sign_extended));
+                                self.writeRegister(i_instruction.rd, @bitCast(sign_extended));
                             },
                             else => unreachable,
                         }
@@ -705,6 +761,7 @@ pub fn execute(
 
                         pointer.* = self.registers[s_instruction.rs2];
                     },
+                    else => return error.IllegalInstruction,
                 }
 
                 program_counter += 1;
@@ -850,7 +907,7 @@ pub fn execute(
                 const return_address: u64 = @intFromPtr(program_counter) + 4;
 
                 //return address
-                self.setRegister(j_instruction.rd, return_address);
+                self.writeRegister(j_instruction.rd, return_address);
 
                 const jump_address = base + offset;
 
@@ -865,7 +922,7 @@ pub fn execute(
                 const jump_address = base + offset;
 
                 //return address
-                self.setRegister(j_instruction.rd, @intFromPtr(program_counter) + 4);
+                self.writeRegister(j_instruction.rd, @intFromPtr(program_counter) + 4);
 
                 const Result = packed struct(i64) {
                     zero: u1,
@@ -939,10 +996,138 @@ pub fn execute(
 
                 program_counter += 1;
             },
-            .op_fp => return error.IllegalInstruction,
-            .load_fp => return error.IllegalInstruction,
-            .store_fp => return error.IllegalInstruction,
+            .op_fp => {
+                if (!config.enable_f_extension) return error.IllegalInstruction;
+
+                var r_instruction: InstructionR = @bitCast(instruction);
+
+                //TODO: handle static and dynamic rounding modes
+                r_instruction.funct3 = 0b111;
+
+                const masked_instruction: RInstructionMask = @enumFromInt(instruction & RInstructionMask.removing_mask);
+
+                switch (masked_instruction) {
+                    .fadd_s => {
+                        @setFloatMode(.strict);
+
+                        const rs1 = self.readFloatRegister(r_instruction.rs1, f32);
+                        const rs2 = self.readFloatRegister(r_instruction.rs2, f32);
+
+                        const result = rs1 + rs2;
+
+                        self.writeFloatRegister(r_instruction.rd, f32, result);
+                    },
+                    .fsub_s => {
+                        @setFloatMode(.strict);
+
+                        const rs1 = self.readFloatRegister(r_instruction.rs1, f32);
+                        const rs2 = self.readFloatRegister(r_instruction.rs2, f32);
+
+                        const result = rs1 - rs2;
+
+                        self.writeFloatRegister(r_instruction.rd, f32, result);
+                    },
+                    .fmul_s => {
+                        @setFloatMode(.strict);
+
+                        const rs1 = self.readFloatRegister(r_instruction.rs1, f32);
+                        const rs2 = self.readFloatRegister(r_instruction.rs2, f32);
+
+                        const result = rs1 * rs2;
+
+                        self.writeFloatRegister(r_instruction.rd, f32, result);
+                    },
+                    .fdiv_s => {
+                        @setFloatMode(.strict);
+
+                        const rs1 = self.readFloatRegister(r_instruction.rs1, f32);
+                        const rs2 = self.readFloatRegister(r_instruction.rs2, f32);
+
+                        const result = rs1 / rs2;
+
+                        self.writeFloatRegister(r_instruction.rd, f32, result);
+                    },
+                    .fcvt_w_s => {
+                        @setFloatMode(.strict);
+
+                        const rs1 = self.readFloatRegister(r_instruction.rs1, f32);
+                        const rs2 = r_instruction.rs2;
+
+                        switch (rs2) {
+                            0b00000 => {
+                                const result: i32 = @intFromFloat(rs1);
+
+                                const sign_extended: i64 = result;
+
+                                self.writeRegister(r_instruction.rd, @bitCast(sign_extended));
+                            },
+                            0b00001 => {
+                                const result: u32 = @intFromFloat(rs1);
+
+                                const zero_extended: u64 = result;
+
+                                self.writeRegister(r_instruction.rd, @bitCast(zero_extended));
+                            },
+                            else => return error.IllegalInstruction,
+                        }
+                    },
+                    else => {
+                        return error.IllegalInstruction;
+                    },
+                }
+
+                program_counter += 1;
+            },
+            .load_fp => {
+                if (!config.enable_f_extension) return error.IllegalInstruction;
+
+                const i_instruction: InstructionI = @bitCast(instruction);
+                const masked_instruction: IInstructionMask = @enumFromInt(instruction & IInstructionMask.removing_mask);
+
+                const base: i64 = @bitCast(self.registers[i_instruction.rs1]);
+                const offset: i64 = @as(i12, @bitCast(i_instruction.imm));
+                const actual: u64 = @bitCast(base + offset);
+
+                switch (masked_instruction) {
+                    .flw => {
+                        const pointer: *align(1) const f32 = @ptrFromInt(actual);
+
+                        self.writeFloatRegister(i_instruction.rd, f32, pointer.*);
+                    },
+                    else => return error.IllegalInstruction,
+                }
+
+                program_counter += 1;
+            },
+            .store_fp => {
+                if (!config.enable_f_extension) return error.IllegalInstruction;
+
+                const s_instruction: InstructionS = @bitCast(instruction);
+                const masked_instruction: SInstructionMask = @enumFromInt(instruction & SInstructionMask.removing_mask);
+
+                const immediate: packed struct(i12) {
+                    lower: u5,
+                    upper: u7,
+                } = .{ .lower = s_instruction.imm, .upper = s_instruction.imm_1 };
+
+                const offset: i64 = @as(i12, @bitCast(immediate));
+                const base: i64 = @bitCast(self.registers[s_instruction.rs1]);
+                const actual: u64 = @bitCast(base + offset);
+
+                switch (masked_instruction) {
+                    .fsw => {
+                        const pointer: *align(1) f32 = @ptrFromInt(actual);
+
+                        pointer.* = self.readFloatRegister(s_instruction.rs2, f32);
+                    },
+                    else => return error.IllegalInstruction,
+                }
+
+                program_counter += 1;
+            },
             .amo => {
+                if (!config.enable_a_extension) return error.IllegalInstruction;
+
                 const r_instruction: InstructionR = @bitCast(instruction);
                 const masked_instruction: RInstructionMask = @enumFromInt(instruction & RInstructionMask.removing_mask);
 
@@ -950,9 +1135,47 @@ pub fn execute(
                     .lr_w_aq_rl => {
                         const pointer: *const i32 = @ptrFromInt(self.registers[r_instruction.rs1]);
 
-                        const result: i64 = @atomicLoad(i32, pointer, std.builtin.AtomicOrder.Acquire);
+                        const result: i64 = @atomicLoad(i32, pointer, std.builtin.AtomicOrder.acquire);
 
-                        self.setRegister(r_instruction.rd, @bitCast(result));
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
+                    },
+                    .lr_w_aq => {
+                        const pointer: *const i32 = @ptrFromInt(self.registers[r_instruction.rs1]);
+
+                        const result: i64 = @atomicLoad(i32, pointer, std.builtin.AtomicOrder.acquire);
+
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
+                    },
+                    .lr_w_rl => {
+                        const pointer: *const i32 = @ptrFromInt(self.registers[r_instruction.rs1]);
+
+                        const result: i64 = @atomicLoad(i32, pointer, std.builtin.AtomicOrder.acquire);
+
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
+                    },
+                    .amoswap_w_aq_rl => {
+                        const pointer: *i32 = @ptrFromInt(self.registers[r_instruction.rs1]);
+                        const value: i32 = @truncate(@as(i64, @bitCast(self.registers[r_instruction.rs2])));
+
+                        const result: i64 = @atomicRmw(i32, pointer, .Xchg, value, .acq_rel);
+
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
+                    },
+                    .amoswap_w_aq => {
+                        const pointer: *i32 = @ptrFromInt(self.registers[r_instruction.rs1]);
+                        const value: i32 = @truncate(@as(i64, @bitCast(self.registers[r_instruction.rs2])));
+
+                        const result: i64 = @atomicRmw(i32, pointer, .Xchg, value, .acquire);
+
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
+                    },
+                    .amoswap_w_rl => {
+                        const pointer: *i32 = @ptrFromInt(self.registers[r_instruction.rs1]);
+                        const value: i32 = @truncate(@as(i64, @bitCast(self.registers[r_instruction.rs2])));
+
+                        const result: i64 = @atomicRmw(i32, pointer, .Xchg, value, .release);
+
+                        self.writeRegister(r_instruction.rd, @bitCast(result));
                     },
                     else => return error.IllegalInstruction,
                 }
@@ -960,6 +1183,8 @@ pub fn execute(
                 program_counter += 1;
             },
             .misc_mem => {
+                if (!config.enable_zifencei_extension) return error.IllegalInstruction;
+
                 //TODO: handle fences
                 //For X86-64, a fence is a no-op*
 
@@ -988,6 +1213,11 @@ pub const SInstructionMask = enum(u32) {
     sd = @bitCast(InstructionS{
         .opcode = 0b0100011,
         .funct3 = 0b011,
+    }),
+
+    fsw = @bitCast(InstructionS{
+        .opcode = @intFromEnum(Opcode.store_fp),
+        .funct3 = 0b010,
     }),
 
     pub const removing_mask: u32 = @bitCast(InstructionS{
@@ -1155,6 +1385,11 @@ pub const RInstructionMask = enum(u32) {
         .funct3 = 0b010,
         .funct7 = 0b00011_01,
     }),
+    amoswap_w_aq_rl = @bitCast(InstructionR{
+        .opcode = 0b0101111,
+        .funct3 = 0b010,
+        .funct7 = 0b00001_11,
+    }),
     amoswap_w_aq = @bitCast(InstructionR{
         .opcode = 0b0101111,
         .funct3 = 0b010,
@@ -1194,6 +1429,33 @@ pub const RInstructionMask = enum(u32) {
         .opcode = 0b0101111,
         .funct3 = 0b010,
         .funct7 = 0b01100_01,
+    }),
+
+    ///Dynamic rounding
+    fadd_s = @bitCast(InstructionR{
+        .opcode = @intFromEnum(Opcode.op_fp),
+        .funct3 = 0b111,
+        .funct7 = 0b0000000,
+    }),
+    fsub_s = @bitCast(InstructionR{
+        .opcode = @intFromEnum(Opcode.op_fp),
+        .funct3 = 0b111,
+        .funct7 = 0b0000100,
+    }),
+    fmul_s = @bitCast(InstructionR{
+        .opcode = @intFromEnum(Opcode.op_fp),
+        .funct3 = 0b111,
+        .funct7 = 0b0001000,
+    }),
+    fdiv_s = @bitCast(InstructionR{
+        .opcode = @intFromEnum(Opcode.op_fp),
+        .funct3 = 0b111,
+        .funct7 = 0b0001100,
+    }),
+    fcvt_w_s = @bitCast(InstructionR{
+        .opcode = @intFromEnum(Opcode.op_fp),
+        .funct3 = 0b111,
+        .funct7 = 0b1100000,
     }),
 
     pub const removing_mask: u32 = @bitCast(InstructionR{
@@ -1277,6 +1539,11 @@ pub const IInstructionMask = enum(u32) {
         .funct3 = 0b101,
     }),
 
+    flw = @bitCast(InstructionI{
+        .opcode = @intFromEnum(Opcode.load_fp),
+        .funct3 = 0b010,
+    }),
+
     pub const removing_mask: u32 = @bitCast(InstructionI{
         .opcode = 0b1111111,
         .funct3 = 0b111,
@@ -1285,32 +1552,32 @@ pub const IInstructionMask = enum(u32) {
 
 pub const BInstructionMask = enum(u32) {
     beq = @bitCast(InstructionB{
-        .opcode = 0b1100011,
+        .opcode = .branch,
         .funct3 = 0b000,
     }),
     bne = @bitCast(InstructionB{
-        .opcode = 0b1100011,
+        .opcode = .branch,
         .funct3 = 0b001,
     }),
     blt = @bitCast(InstructionB{
-        .opcode = 0b1100011,
+        .opcode = .branch,
         .funct3 = 0b100,
     }),
     bge = @bitCast(InstructionB{
-        .opcode = 0b1100011,
+        .opcode = .branch,
         .funct3 = 0b101,
     }),
     bltu = @bitCast(InstructionB{
-        .opcode = 0b1100011,
+        .opcode = .branch,
         .funct3 = 0b110,
     }),
     bgeu = @bitCast(InstructionB{
-        .opcode = 0b1100011,
+        .opcode = .branch,
         .funct3 = 0b111,
     }),
 
     pub const removing_mask: u32 = @bitCast(InstructionB{
-        .opcode = 0b1111111,
+        .opcode = @enumFromInt(0b1111111),
         .funct3 = 0b111,
     });
 };
@@ -1429,7 +1696,6 @@ pub const FloatRegister = enum(u5) {
     f12,
     f13,
     f14,
-    f14,
     f15,
     f16,
     f17,
@@ -1526,7 +1792,7 @@ pub const InstructionU = packed struct(u32) {
 };
 
 pub const InstructionB = packed struct(u32) {
-    opcode: u7 = 0,
+    opcode: Opcode,
     imm: u5 = 0,
     funct3: u3 = 0,
     rs1: u5 = 0,

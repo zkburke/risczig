@@ -3,7 +3,7 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const risczig_module = b.addModule("risczig", .{
-        .root_source_file = .{ .path = b.pathFromRoot("src/root.zig") },
+        .root_source_file = b.path("src/root.zig"),
     });
 
     const script_target = b.resolveTargetQuery(.{
@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) !void {
 
     const riscv_script = b.addSharedLibrary(.{
         .name = "riscv_script",
-        .root_source_file = .{ .path = "example/riscv_script.zig" },
+        .root_source_file = b.path("example/riscv_script.zig"),
         .target = script_target,
         .optimize = .Debug,
         .use_llvm = true,
@@ -35,16 +35,17 @@ pub fn build(b: *std.Build) !void {
     b.getInstallStep().dependOn(&install_file.step);
 
     riscv_script.addCSourceFile(.{
-        .file = .{ .path = "example/riscv_script_c.c" },
+        .file = b.path("example/riscv_script_c.c"),
     });
 
     b.installArtifact(riscv_script);
 
     const exe = b.addExecutable(.{
         .name = "riscz_example",
-        .root_source_file = .{ .path = "example/main.zig" },
+        .root_source_file = b.path("example/main.zig"),
         .target = target,
         .optimize = optimize,
+        .use_llvm = true,
     });
 
     exe.root_module.addImport("riscz", risczig_module);
@@ -71,7 +72,7 @@ pub fn build(b: *std.Build) !void {
     run_step.dependOn(&run_cmd.step);
 
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/root.zig" },
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -87,9 +88,15 @@ pub fn build(b: *std.Build) !void {
     //Compile All riscv-test assembly files into their own seperate objects
     //We *should* be able to use clang
     if (include_riscv_tests) {
+        _ = std.fs.cwd().openDir("test/lib/riscv-tests/", .{}) catch {
+            std.log.err("Couldn't open riscv-tests. Clone https://github.com/riscv-software-src/riscv-tests.git into test/lib/", .{});
+
+            return error.OpeningRiscvTestsFailed;
+        };
+
         const test_runner = b.addExecutable(.{
             .name = "risczig_test_runner",
-            .root_source_file = .{ .path = "test/vm/test_runner.zig" },
+            .root_source_file = b.path("test/vm/test_runner.zig"),
             .target = b.host,
             .optimize = .Debug,
         });
@@ -110,6 +117,8 @@ pub fn build(b: *std.Build) !void {
         const test_vms = [_][]const u8{
             "rv64ui/",
             "rv64um/",
+            "rv64uf/",
+            // "rv64ua/",
         };
 
         for (test_vms) |test_vm_path| {
@@ -149,9 +158,9 @@ pub fn build(b: *std.Build) !void {
                     .error_tracing = false,
                 });
 
-                assembly_test_executable.addIncludePath(.{ .path = b.pathFromRoot(riscv_tests_path ++ "env/p/") });
-                assembly_test_executable.addIncludePath(.{ .path = b.pathFromRoot(riscv_tests_path ++ "isa/macros/scalar/") });
-                assembly_test_executable.setLinkerScript(.{ .path = b.pathFromRoot(riscv_tests_path ++ "env/p/link.ld") });
+                assembly_test_executable.addIncludePath(b.path(riscv_tests_path ++ "env/p/"));
+                assembly_test_executable.addIncludePath(b.path(riscv_tests_path ++ "isa/macros/scalar/"));
+                assembly_test_executable.setLinkerScript(b.path(riscv_tests_path ++ "env/p/link.ld"));
 
                 const assembly_source_path = b.pathJoin(&.{
                     riscv_tests_path,
@@ -160,7 +169,7 @@ pub fn build(b: *std.Build) !void {
                     assembly_sub_path,
                 });
 
-                assembly_test_executable.addAssemblyFile(.{ .path = assembly_source_path });
+                assembly_test_executable.addAssemblyFile(b.path(assembly_source_path));
 
                 const install_directory = b.pathJoin(&.{
                     "test/",
@@ -198,7 +207,7 @@ pub fn build(b: *std.Build) !void {
         .target = b.host,
         //TODO: optimize for ReleaseFast
         .optimize = .Debug,
-        .root_source_file = .{ .path = b.pathFromRoot("benchmark/main.zig") },
+        .root_source_file = b.path("benchmark/main.zig"),
     });
 
     benchmark_exe.root_module.addImport("risczig", risczig_module);
@@ -211,7 +220,7 @@ pub fn build(b: *std.Build) !void {
 
     const riscv_benchmark_library = b.addSharedLibrary(.{
         .name = "factorial",
-        .root_source_file = .{ .path = "benchmark/shared/numeric/factorial.zig" },
+        .root_source_file = b.path("benchmark/shared/numeric/factorial.zig"),
         .target = script_target,
         .optimize = .ReleaseSmall,
         .use_llvm = true,

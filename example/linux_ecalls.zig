@@ -23,8 +23,8 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
 
             _ = switch (file_descriptor) {
                 0 => @panic("Can't write to stdin"),
-                1 => std.os.write(std.os.STDOUT_FILENO, string),
-                2 => std.os.write(std.os.STDERR_FILENO, string),
+                1 => std.posix.write(std.posix.STDOUT_FILENO, string),
+                2 => std.posix.write(std.posix.STDERR_FILENO, string),
                 else => @panic("Invalid file descriptor"),
             } catch @panic("Write returned an error");
 
@@ -36,7 +36,7 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
             // });
 
             //set error code
-            vm.setRegister(@intFromEnum(Hart.AbiRegister.a5), 0);
+            vm.writeRegister(@intFromEnum(Hart.AbiRegister.a5), 0);
         },
         .exit => {
             const error_code = vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
@@ -49,10 +49,10 @@ pub fn ecall(vm: *Hart) Hart.InterruptResult {
             const signum = vm.registers[@intFromEnum(Hart.AbiRegister.a0)];
 
             switch (signum) {
-                std.os.SIG.SEGV => {
+                std.posix.SIG.SEGV => {
                     std.log.info("ecall: rt_sigaction: signum = SEGV", .{});
                 },
-                std.os.SIG.BUS => {
+                std.posix.SIG.BUS => {
                     std.log.info("ecall: rt_sigaction: signum = BUS", .{});
                 },
                 else => {

@@ -68,7 +68,7 @@ pub export fn _start() void {
 
     for (3..10) |_| printInt(res);
 
-    std.os.exit(0);
+    std.os.linux.exit(0);
 }
 
 export fn zprint(str: [*:0]const u8) void {
@@ -112,28 +112,30 @@ pub fn specialCall(number: usize, arg1: usize) usize {
     );
 }
 
-pub const std_options = struct {
-    pub fn logFn(
-        comptime message_level: std.log.Level,
-        comptime scope: @Type(.EnumLiteral),
-        comptime format: []const u8,
-        args: anytype,
-    ) void {
-        const level_txt = comptime message_level.asText();
-        const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-
-        var print_buffer: [10 * 1024]u8 = undefined;
-
-        const output = std.fmt.bufPrint(&print_buffer, level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
-
-        _ = std.os.write(std.os.STDOUT_FILENO, output) catch return;
-
-        if (false) {
-            const stderr = std.io.getStdErr().writer();
-            stderr.print(level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
-        }
-    }
+pub const std_options: std.Options = .{
+    .logFn = logFn,
 };
+
+pub fn logFn(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    const level_txt = comptime message_level.asText();
+    const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+
+    var print_buffer: [10 * 1024]u8 = undefined;
+
+    const output = std.fmt.bufPrint(&print_buffer, level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
+
+    _ = std.os.linux.write(std.os.linux.STDOUT_FILENO, output.ptr, output.len);
+
+    if (false) {
+        const stderr = std.io.getStdErr().writer();
+        stderr.print(level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
+    }
+}
 
 pub fn panic(msg: []const u8, stacktrace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
     _ = std.io.getStdErr().write("panic: ") catch 0;
@@ -175,7 +177,7 @@ pub fn panic(msg: []const u8, stacktrace: ?*std.builtin.StackTrace, ret_addr: ?u
         // };
     }
 
-    std.os.exit(1);
+    std.os.linux.exit(1);
 }
 
 const std = @import("std");

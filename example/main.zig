@@ -58,13 +58,16 @@ pub fn main() !void {
 
     const mod_deinit_address: [*]const u32 = @ptrFromInt(imported_symbol_addresses[1]);
 
-    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+    vm.writeRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
 
     try vm.execute(
         .{
             .ecall_handler = linux_ecalls.ecall,
             .ebreak_handler = Handlers.ebreak,
             .debug_instructions = false,
+            .enable_f_extension = false,
+            .enable_a_extension = false,
+            .enable_m_extension = true,
         },
         entry_point,
     );
@@ -86,7 +89,7 @@ pub fn main() !void {
     const mod_init_address: riscz.ProcedureAddress(fn (ctx_value: u32) callconv(.C) u32) = .{ .address = imported_symbol_addresses[0] };
 
     vm.resetRegisters();
-    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+    vm.writeRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
 
     switch (try riscz.callProcedure(&vm, execute_config, zig_mod_init_address, .{})) {
         .succeed => {
@@ -99,14 +102,14 @@ pub fn main() !void {
     }
 
     vm.resetRegisters();
-    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+    vm.writeRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
 
     const mod_init_res = try riscz.callProcedure(&vm, execute_config, mod_init_address, .{98});
 
     std.log.info("mod_init_res = {}", .{mod_init_res});
 
     vm.resetRegisters();
-    vm.setRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
+    vm.writeRegister(@intFromEnum(Hart.AbiRegister.sp), @intFromPtr(loaded_module.stack.ptr + loaded_module.stack.len));
 
     try vm.execute(
         .{
@@ -125,19 +128,21 @@ fn functionNameStem(path: []const u8) []const u8 {
     return path[index..];
 }
 
-fn ImportProceduresFromStruct(comptime namespace: anytype) type {
+fn ImportProceduresFromStruct(comptime namespace: anytype) std.StaticStringMap(*const Hart.NativeCall) {
     const Entry = struct { []const u8, *const Hart.NativeCall };
-    var kv_list: []const Entry = &.{};
+    comptime var kv_list: []const Entry = &.{};
 
-    for (@typeInfo(namespace).Struct.decls) |decl| {
-        const exported_name = functionNameStem(decl.name);
+    comptime {
+        for (@typeInfo(namespace).Struct.decls) |decl| {
+            const exported_name = functionNameStem(decl.name);
 
-        kv_list = kv_list ++ [_]Entry{
-            .{ exported_name, &abi.nativeCallWrapper(@field(namespace, decl.name)) },
-        };
+            kv_list = kv_list ++ [_]Entry{
+                .{ exported_name, &abi.nativeCallWrapper(@field(namespace, decl.name)) },
+            };
+        }
     }
 
-    return std.ComptimeStringMap(*const Hart.NativeCall, kv_list);
+    return std.StaticStringMap(*const Hart.NativeCall).initComptime(kv_list);
 }
 
 ///Native api exposed to scripts
