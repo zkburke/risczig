@@ -20,7 +20,7 @@ pub inline fn callProcedure(
 ) Hart.ExecuteError!ReturnType(@TypeOf(procedure).prototype) {
     const FunctionType = @TypeOf(procedure).prototype;
 
-    if (args.len != @typeInfo(FunctionType).Fn.params.len) {
+    if (args.len != @typeInfo(FunctionType).@"fn".params.len) {
         @compileError("Missing args");
     }
 
@@ -38,7 +38,7 @@ pub inline fn callProcedure(
 }
 
 fn ReturnType(comptime procedure: type) type {
-    return @typeInfo(procedure).Fn.return_type.?;
+    return @typeInfo(procedure).@"fn".return_type.?;
 }
 
 const std = @import("std");

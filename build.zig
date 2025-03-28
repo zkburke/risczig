@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) !void {
         .name = "riscv_script",
         .root_source_file = b.path("example/riscv_script.zig"),
         .target = script_target,
-        .optimize = .Debug,
+        .optimize = .ReleaseFast,
         .use_llvm = true,
         .link_libc = false,
         .single_threaded = true,
@@ -97,7 +97,7 @@ pub fn build(b: *std.Build) !void {
         const test_runner = b.addExecutable(.{
             .name = "risczig_test_runner",
             .root_source_file = b.path("test/vm/test_runner.zig"),
-            .target = b.host,
+            .target = b.graph.host,
             .optimize = .Debug,
         });
 
@@ -204,7 +204,7 @@ pub fn build(b: *std.Build) !void {
 
     const benchmark_exe = b.addExecutable(.{
         .name = "benchmark",
-        .target = b.host,
+        .target = b.graph.host,
         //TODO: optimize for ReleaseFast
         .optimize = .Debug,
         .root_source_file = b.path("benchmark/main.zig"),

@@ -64,12 +64,26 @@ pub export fn _start() void {
 
     printInt(res + fib_res);
 
-    printInt(@divTrunc(res, zero(0)));
+    // printInt(@divTrunc(res, zero(0)));
 
-    for (3..10) |_| printInt(res);
+    // for (3..10) |_| printInt(res);
+
+    const sin_eigth = math.fixedCosTau(i64, .ratio(1, 8));
+    const cos_eigth = math.fixedSinTau(i64, .ratio(1, 8));
+
+    log.err("root_2_on_2: ", .{});
+
+    log.err("sin_eigth = {} ", .{sin_eigth});
+    log.err("cos_eigth = {} ", .{cos_eigth});
+
+    math.formatFixed(i64, sin_eigth);
+    math.formatFixed(i64, cos_eigth);
+    math.formatFixed(i64, cos_eigth.mul(.integer(2)));
 
     std.os.linux.exit(0);
 }
+
+const math = @import("math.zig");
 
 export fn zprint(str: [*:0]const u8) void {
     log.err("c string: {s}", .{std.mem.span(str)});
@@ -118,7 +132,7 @@ pub const std_options: std.Options = .{
 
 pub fn logFn(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {

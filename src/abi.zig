@@ -4,7 +4,7 @@
 ///Returns a native wrapper function for a callconv(.C) function
 ///Arguments must be representable in the ABI
 pub fn nativeCallWrapper(comptime function: anytype) Hart.NativeCall {
-    const function_info = @typeInfo(@TypeOf(function)).Fn;
+    const function_info = @typeInfo(@TypeOf(function)).@"fn";
 
     validateFunctionPrototype(function);
 
@@ -48,9 +48,9 @@ pub fn nativeCallWrapper(comptime function: anytype) Hart.NativeCall {
 }
 
 fn validateFunctionPrototype(comptime function: anytype) void {
-    const function_info = @typeInfo(@TypeOf(function)).Fn;
+    const function_info = @typeInfo(@TypeOf(function)).@"fn";
 
-    if (function_info.calling_convention != .C) {
+    if (function_info.calling_convention == .auto) {
         @compileError("Function can only use the C calling convention");
     }
 
@@ -84,7 +84,7 @@ pub const AbiLocation = union(enum) {
 };
 
 pub fn getParameterLocations(comptime function_type: anytype) []const AbiLocation {
-    const function_info = @typeInfo(function_type).Fn;
+    const function_info = @typeInfo(function_type).@"fn";
 
     std.debug.assert(!function_info.is_generic);
     std.debug.assert(!function_info.is_var_args);
@@ -102,7 +102,7 @@ pub fn getParameterLocations(comptime function_type: anytype) []const AbiLocatio
         std.debug.assert(param_size <= @sizeOf(u64));
 
         switch (@typeInfo(param.type.?)) {
-            .Pointer => {
+            .pointer => {
                 if (param.type == *const Hart or param.type == *Hart) {
                     locations = locations ++ &[_]AbiLocation{location};
 
@@ -113,12 +113,12 @@ pub fn getParameterLocations(comptime function_type: anytype) []const AbiLocatio
 
                 next_general_register = @enumFromInt(@intFromEnum(next_general_register.?) + 1);
             },
-            .Int, .Enum, .Bool => {
+            .int, .@"enum", .bool => {
                 location = .{ .general_register = next_general_register.? };
 
                 next_general_register = @enumFromInt(@intFromEnum(next_general_register.?) + 1);
             },
-            .Float => {
+            .float => {
                 @compileError("Floats are unsupported");
             },
             else => @compileError("Type unsupported"),
@@ -131,7 +131,7 @@ pub fn getParameterLocations(comptime function_type: anytype) []const AbiLocatio
 }
 
 pub fn getReturnLocation(comptime function_type: anytype) ?AbiLocation {
-    const function_info = @typeInfo(function_type).Fn;
+    const function_info = @typeInfo(function_type).@"fn";
 
     if (function_info.return_type == null) return null;
 
@@ -147,21 +147,21 @@ pub fn getReturnLocation(comptime function_type: anytype) ?AbiLocation {
 
     //walk through arguments in order and allocate locations
     switch (@typeInfo(function_info.return_type.?)) {
-        .Pointer => {
+        .pointer => {
             location = .{ .general_register = next_general_register.? };
 
             next_general_register = @enumFromInt(@intFromEnum(next_general_register.?) + 1);
         },
-        .Int, .Enum, .Bool => {
+        .int, .@"enum", .bool => {
             location = .{ .general_register = next_general_register.? };
 
             next_general_register = @enumFromInt(@intFromEnum(next_general_register.?) + 1);
         },
-        .Float => {
+        .float => {
             @compileError("Floats are unsupported");
         },
-        .Struct => @compileError("Structs are unsupported"),
-        .Union => @compileError("Unions are unsupported"),
+        .@"struct" => @compileError("Structs are unsupported"),
+        .@"union" => @compileError("Unions are unsupported"),
         else => @compileError("Type unsupported"),
     }
 
@@ -170,7 +170,7 @@ pub fn getReturnLocation(comptime function_type: anytype) ?AbiLocation {
 
 pub inline fn loadParameter(hart: *const Hart, comptime location: AbiLocation, comptime T: type) T {
     switch (@typeInfo(T)) {
-        .Pointer => {
+        .pointer => {
             std.debug.assert(location == .general_register);
 
             switch (location) {
@@ -183,7 +183,7 @@ pub inline fn loadParameter(hart: *const Hart, comptime location: AbiLocation, c
                 .float_register => unreachable,
             }
         },
-        .Int => |integer_type| {
+        .int => |integer_type| {
             std.debug.assert(location == .general_register);
 
             switch (location) {
@@ -196,7 +196,7 @@ pub inline fn loadParameter(hart: *const Hart, comptime location: AbiLocation, c
                 .float_register => unreachable,
             }
         },
-        .Enum => {
+        .@"enum" => {
             std.debug.assert(location == .general_register);
 
             switch (location) {
@@ -209,7 +209,7 @@ pub inline fn loadParameter(hart: *const Hart, comptime location: AbiLocation, c
                 .float_register => unreachable,
             }
         },
-        .Bool => {
+        .bool => {
             std.debug.assert(location == .general_register);
 
             switch (location) {
@@ -230,7 +230,7 @@ pub inline fn loadParameter(hart: *const Hart, comptime location: AbiLocation, c
 
 pub inline fn storeParameter(hart: *Hart, comptime location: AbiLocation, comptime T: type, value: T) void {
     switch (@typeInfo(T)) {
-        .Pointer => {
+        .pointer => {
             switch (location) {
                 .general_register => |register| {
                     hart.registers[@intFromEnum(register)] = @intFromPtr(value);
@@ -238,7 +238,7 @@ pub inline fn storeParameter(hart: *Hart, comptime location: AbiLocation, compti
                 else => comptime unreachable,
             }
         },
-        .Int, .ComptimeInt => {
+        .int, .comptime_int => {
             switch (location) {
                 .general_register => |register| {
                     hart.registers[@intFromEnum(register)] = value;

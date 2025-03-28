@@ -1,28 +1,28 @@
 # Implementation of long jump refereneced from the musl implementation
 
 set_jump:
-	mov %rbx, (%rdi)         /* rdi is jmp_buf, move registers onto it */
-	mov %rbp, 8(%rdi)
-	mov %r12, 16(%rdi)
-	mov %r13, 24(%rdi)
-	mov %r14, 32(%rdi)
-	mov %r15, 40(%rdi)
-	lea 8(%rsp), %rdx        /* this is our rsp WITHOUT current ret addr */
-	mov %rdx, 48(%rdi)
-	mov (%rsp), %rdx         /* save return addr ptr for new rip */
-	mov %rdx, 56(%rdi)
-	xor %eax, %eax           /* always return 0 */
+	mov rbx, (rdi)         /* rdi is jmp_buf, move registers onto it */
+	mov rbp, [rdi + 8]
+	mov r12, [rdi + 16]
+	mov r13, [rdi + 24]
+	mov r14, [rdi + 32]
+	mov r15, [rdi + 40]
+	lea rdx, [rsp + 8]        /* this is our rsp WITHOUT current ret addr */
+	mov rdx, [rdi + 48]
+	mov rdx, (rsp)         /* save return addr ptr for new rip */
+	mov [rdi + 56], rdx
+	xor eax, eax           /* always return 0 */
 	ret
 
 long_jump:
-	xor %eax, %eax
-	cmp $1, %esi             /* CF = val ? 0 : 1 */
-	adc %esi, %eax           /* eax = val + !val */
-	mov (%rdi), %rbx         /* rdi is the jmp_buf, restore regs from it */
-	mov 8(%rdi), %rbp
-	mov 16(%rdi), %r12
-	mov 24(%rdi), %r13
-	mov 32(%rdi), %r14
-	mov 40(%rdi), %r15
-	mov 48(%rdi), %rsp
-	jmp *56(%rdi)           /* goto saved address without altering rsp */
+	xor eax, eax
+	cmp esi, 1             /* CF = val ? 0 : 1 */
+	adc esi, eax           /* eax = val + !val */
+	mov rbx, (rdi)         /* rdi is the jmp_buf, restore regs from it */
+	mov [rdi + 8], rbp
+	mov [rdi + 16], r12
+	mov [rdi + 24], r13
+	mov [rdi + 32], r14
+	mov [rdi + 40], r15
+	mov [rdi + 48], rsp
+	jmp [rdi + 46]           /* goto saved address without altering rsp */

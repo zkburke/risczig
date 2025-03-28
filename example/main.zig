@@ -133,7 +133,7 @@ fn ImportProceduresFromStruct(comptime namespace: anytype) std.StaticStringMap(*
     comptime var kv_list: []const Entry = &.{};
 
     comptime {
-        for (@typeInfo(namespace).Struct.decls) |decl| {
+        for (@typeInfo(namespace).@"struct".decls) |decl| {
             const exported_name = functionNameStem(decl.name);
 
             kv_list = kv_list ++ [_]Entry{

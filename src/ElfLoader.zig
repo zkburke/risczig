@@ -55,7 +55,7 @@ pub fn load(
 
     std.debug.assert(minimum_virtual_address != std.math.maxInt(usize));
 
-    const image = allocator.rawAlloc(image_size, 32, @returnAddress()).?;
+    const image = allocator.rawAlloc(image_size, .@"32", @returnAddress()).?;
     errdefer allocator.free(image[0..image_size]);
 
     @memset(image[0..image_size], undefined);
@@ -90,8 +90,7 @@ pub fn load(
             .dynamic => {
                 const dynamic_section = elf_data[program_header.offset .. program_header.offset + program_header.filesz];
 
-                const values_ptr: [*]const Dyn = @alignCast(@ptrCast(dynamic_section));
-                const values = values_ptr[0 .. dynamic_section.len / @sizeOf(Dyn)];
+                const values: []const Dyn = @ptrCast(@alignCast(dynamic_section));
 
                 var relocation_table_size: usize = 0;
 
@@ -250,7 +249,7 @@ pub fn load(
     log.info("image base = {*}, image size = {}", .{ image, image_size });
 
     //TODO: stack should be local/unique to each hart, not to loaded modules
-    const stack = allocator.rawAlloc(stack_size, 16, @returnAddress()).?;
+    const stack = allocator.rawAlloc(stack_size, .@"16", @returnAddress()).?;
     errdefer allocator.free(stack[0..stack_size]);
 
     log.info("stack base = {*}, stack size = {}", .{ stack, stack_size });

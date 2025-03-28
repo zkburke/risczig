@@ -53,7 +53,10 @@ const segfault_handling = struct {
         h: u64,
     };
 
-    pub extern fn set_jump(buf: *JumpBuffer) callconv(.C) bool;
+    // pub extern fn set_jump(buf: *JumpBuffer) callconv(.C) bool;
+    pub fn set_jump(_: *JumpBuffer) bool {
+        return false;
+    }
 
     extern fn long_jump(buf: *JumpBuffer, _: bool) callconv(.C) void;
 
